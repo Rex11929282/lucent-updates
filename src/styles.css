@@ -1,0 +1,1142 @@
+:root {
+  --ui-fg: #f4f6ff;
+  --ui-glass: rgba(255, 255, 255, 0.10);
+  --ui-glass-strong: rgba(255, 255, 255, 0.18);
+  --ui-border: rgba(255, 255, 255, 0.24);
+  font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  background: transparent !important;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ===================== 藥丸字幕（overlay） ===================== */
+.app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stage { position: relative; z-index: 1; }
+
+/* 桌面擷取背景：對齊視窗後方桌面，讓玻璃折射它 */
+.desktopbg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* 藥丸只是事件容器；玻璃本體由元件用 position:fixed 置中重疊 */
+.capsule { cursor: default; }
+/* 元件的兩層邊緣高光自帶「向外的深色陰影」，在透明視窗上會顯現成一圈深色外框。
+   只保留內側高光，去掉向外的陰影 → 外框不再露出來。 */
+/* 元件的兩層「邊緣高光 span」尺寸來自它內部的舊值，視窗一變就比藥丸大，
+   那圈白色內描邊會露成外框。玻璃本體已自帶內側高光，這兩層直接隱藏。 */
+.capsule > span { display: none !important; }
+/* liquid-glass-react 的兩個直屬輔助層在非 Tailwind 環境可能漏出；
+   只停用它們，真正的 GlassContainer 與內容均不受影響。 */
+.capsule > .bg-black.pointer-events-none,
+.capsule > .mix-blend-overlay.pointer-events-none { display: none !important; }
+/* 移除元件自帶的下方陰影（小視窗會裁成長方形）；
+   並在藥丸內加一層霧面，讓「動態模糊/折射(雨滴感)」看得見 —— 純透明會沒東西可模糊。 */
+/* ============ 背景材質系統 ============
+   玻璃本體只負責邊框高光與陰影；實際的底色/封面/漸層都畫在 .bglayer，
+   這樣「模糊」(filter:blur) 與「透明度」(opacity) 才能完全獨立。 */
+.capsule .glass,
+.preview .glass {
+  background: transparent !important;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, calc(var(--edge-hl, 0.45) * 1.4)),
+    inset 0 -2px 6px rgba(255, 255, 255, calc(var(--edge-hl, 0.45) * 0.26)),
+    inset 0 0 0 1px rgba(255, 255, 255, calc(var(--edge-hl, 0.45) * 0.5)),
+    inset 0 0 22px rgba(0, 0, 0, var(--sh-in, 0.25)),
+    0 6px var(--sh-out-blur, 26px) rgba(0, 0, 0, var(--sh-out, 0.35)),
+    0 0 calc(var(--oglow, 0) * 40px) rgba(0, 0, 0, 0) !important;
+  position: relative;
+}
+/* 外發光（獨立一層，避免與內側高光互相覆寫） */
+.capsule .glass::after,
+.preview .glass::after {
+  box-shadow: 0 0 calc(var(--oglow, 0) * 34px) calc(var(--oglow, 0) * 6px) var(--oglow-c, #7fb0ff);
+}
+
+.visualclip {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: var(--radius, 999px);
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+}
+.background-stack {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: var(--bg-alpha, 0.55);
+}
+.coverlayer,
+.bglayer {
+  position: absolute;
+  inset: -10px;
+  border-radius: inherit;
+  pointer-events: none;
+  filter:
+    blur(var(--bg-blur, 18px))
+    saturate(var(--bg-sat, 1.2))
+    brightness(var(--bg-bright, 1))
+    contrast(var(--bg-contrast, 1));
+}
+.coverlayer {
+  z-index: 0;
+  background: var(--cover-img, none) center / cover no-repeat;
+}
+.bglayer {
+  z-index: 1;
+  background:
+    /* 上緣亮面 */
+    linear-gradient(180deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,.05) 48%, rgba(255,255,255,.10) 100%),
+    /* 染色 */
+    linear-gradient(0deg,
+      color-mix(in srgb, var(--tint, #8fa8ff) calc(var(--tint-a, .12) * 100%), transparent),
+      color-mix(in srgb, var(--tint, #8fa8ff) calc(var(--tint-a, .12) * 100%), transparent)),
+    /* 壓暗讓白字看得清 */
+    linear-gradient(0deg, rgba(0,0,0,.24), rgba(0,0,0,.24)),
+    /* 沒有封面時的中性霧面 */
+    rgba(255,255,255, calc(var(--frost, 0.2) * 1.1));
+}
+.decoration-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.noise-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--noise-a, 0);
+  background-image:
+    repeating-radial-gradient(circle at 17% 23%, rgba(255,255,255,.22) 0 .45px, transparent .8px 3px),
+    repeating-radial-gradient(circle at 73% 61%, rgba(0,0,0,.18) 0 .4px, transparent .75px 3.6px);
+  background-size: 13px 11px, 17px 19px;
+  contain: strict;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: opacity;
+}
+.glass-sheen {
+  position: absolute;
+  left: calc(-1 * var(--sheen-w, 34%));
+  top: 50%;
+  z-index: 4;
+  width: var(--sheen-w, 34%);
+  height: var(--sheen-h, 140%);
+  pointer-events: none;
+  opacity: 0;
+  filter: blur(var(--sheen-blur, 16px)) brightness(var(--sheen-bright, 1.5));
+  transform: translate3d(0, -50%, 0);
+  animation: sheenTravel var(--sheen-cycle, 7.2s) linear infinite;
+  will-change: transform, opacity;
+}
+.glass-sheen > i { display: block; width: 100%; height: 100%; }
+.glass-sheen.sheen-rtl { left: auto; right: calc(-1 * var(--sheen-w, 34%)); animation-name: sheenTravelRtl; }
+.sheen-oval > i {
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255,255,255,.95), rgba(255,255,255,.2) 48%, transparent 72%);
+}
+.sheen-droplet > i {
+  border-radius: 70% 35% 70% 35%;
+  background: linear-gradient(135deg, transparent 8%, rgba(255,255,255,.92) 46%, rgba(180,220,255,.22) 70%, transparent 86%);
+  transform: rotate(24deg);
+}
+.sheen-arc > i {
+  border: clamp(4px, 1.6vh, 12px) solid rgba(255,255,255,.76);
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+@keyframes sheenTravel {
+  0%, 2% { transform: translate3d(0, -50%, 0); opacity: 0; }
+  4% { opacity: var(--sheen-opacity, .45); }
+  22% { transform: translate3d(calc(100vw + var(--sheen-w, 34%)), -50%, 0); opacity: var(--sheen-opacity, .45); }
+  24%, 100% { transform: translate3d(calc(100vw + var(--sheen-w, 34%)), -50%, 0); opacity: 0; }
+}
+@keyframes sheenTravelRtl {
+  0%, 2% { transform: translate3d(0, -50%, 0); opacity: 0; }
+  4% { opacity: var(--sheen-opacity, .45); }
+  22% { transform: translate3d(calc(-100vw - var(--sheen-w, 34%)), -50%, 0); opacity: var(--sheen-opacity, .45); }
+  24%, 100% { transform: translate3d(calc(-100vw - var(--sheen-w, 34%)), -50%, 0); opacity: 0; }
+}
+.content-shell { position: relative; }
+.content--shatter-hidden { pointer-events: none; }
+.content--shatter-out { animation: particleContentOut .12s ease-out both; }
+.content--dormant { opacity: 0; }
+.content--shatter-in { animation: particleContentIn var(--particle-in-dur, .85s) ease-in-out both; }
+@keyframes particleContentOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes particleContentIn { 0%, 68% { opacity: 0; } 100% { opacity: 1; } }
+.capsule.effects-paused *,
+.capsule.effects-paused .glass,
+.capsule.effects-paused .plain {
+  animation-play-state: paused !important;
+}
+.capsule.effects-paused .content--shatter-out,
+.capsule.effects-paused .content--shatter-in {
+  animation-play-state: running !important;
+}
+.capsule .glass:has(.content--shatter-hidden) {
+  box-shadow: none !important;
+}
+.capsule .glass:has(.content--shatter-hidden) > .glass__warp,
+.capsule .glass:has(.content--shatter-hidden)::after {
+  visibility: hidden;
+}
+.song-transition-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  border-radius: var(--radius, 999px);
+  pointer-events: none;
+  contain: strict;
+}
+.song-transition-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.song-transition-wrap {
+  transform-origin: center;
+  will-change: transform, opacity, filter;
+}
+.song-transition-wrap.transition-run.transition-collapse.phase-collapse { animation: songCollapse .22s cubic-bezier(.4,0,.2,1) both; }
+.song-transition-wrap.transition-collapse.phase-hold { transform: scaleX(.14) scaleY(.82); opacity: .18; filter: blur(3px); }
+.song-transition-wrap.transition-collapse.phase-expand { animation: songExpand .36s cubic-bezier(.2,1.2,.4,1) both; }
+/* 破碎由 content 內的實際裁切碎片負責，外層位置與藥丸尺寸完全不動。 */
+.song-transition-wrap.transition-shatter.phase-collapse,
+.song-transition-wrap.transition-shatter.phase-hold,
+.song-transition-wrap.transition-shatter.phase-expand,
+.song-transition-wrap.transition-shatter.phase-capture-out,
+.song-transition-wrap.transition-shatter.phase-shatter-out,
+.song-transition-wrap.transition-shatter.phase-dormant,
+.song-transition-wrap.transition-shatter.phase-capture-in,
+.song-transition-wrap.transition-shatter.phase-shatter-in { transform: none; opacity: 1; filter: none; }
+@keyframes songCollapse { to { transform: scaleX(.14) scaleY(.82); opacity: .18; filter: blur(3px); } }
+@keyframes songExpand { from { transform: scaleX(.14) scaleY(.82); opacity: .18; filter: blur(3px); } to { transform: none; opacity: 1; filter: none; } }
+/* 漸層背景：與模糊可同時存在（畫在同一層，一起被 blur 處理） */
+.grad-linear .bglayer {
+  background:
+    linear-gradient(var(--grad-angle, 145deg),
+      color-mix(in srgb, var(--grad-c1) 88%, transparent),
+      color-mix(in srgb, var(--grad-c2) 88%, transparent)),
+    rgba(255,255,255, calc(var(--frost, 0.2) * 1.1));
+}
+.grad-radial .bglayer {
+  background:
+    radial-gradient(circle at 32% 28%,
+      color-mix(in srgb, var(--grad-c1) 92%, transparent),
+      color-mix(in srgb, var(--grad-c2) 88%, transparent) 72%),
+    rgba(255,255,255, calc(var(--frost, 0.2) * 1.1));
+}
+/* 噪點質感 */
+/* 內容要在材質層之上。
+   同時把圓角往下傳（.glass → .content → .bglayer / 特效層），
+   讓背景材質與之後的裝飾特效都能正確依圓角裁切。 */
+.content { position: relative; z-index: 1; border-radius: var(--radius, 999px); }
+.content--glass {
+  padding:
+    12px
+    30px
+    11px;
+}
+.content--plain {
+  padding:
+    6px
+    10px;
+}
+.songname, .row-wrap { position: relative; z-index: 1; }
+
+/* 字幕：固定、不滾動、最多兩行、完整；下方進度條 */
+.lyrics {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  text-align: center;
+}
+/* 至少兩行高（一行時置中留白），字多就往下長 → 保證完整顯示不截斷 */
+.lyrics__cur {
+  min-height: 2.5em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: var(--lyric-a, 1);
+  padding: 0;
+}
+.lyrics__txt {
+  /* 不截斷：字多就換行，藥丸會自動長高（保證完整顯示） */
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  /* 描邊：玻璃是透明的，沒有描邊時白字會被桌布吃掉。
+     用多層陰影做出外框，任何背景（亮/暗/雜亂）都讀得清楚。 */
+  paint-order: stroke fill;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  -webkit-text-stroke: var(--text-stroke, .06em) rgba(0, 0, 0, 0.92);
+  /* 清晰度：--clarity 越高，陰影半徑收得越緊、外圈柔光越淡，
+     字就越銳利；越低則保留柔和光暈。 */
+  text-shadow:
+    0 1px var(--text-shadow-near, 2px) rgba(0, 0, 0, .95),
+    0 2px var(--text-shadow-mid, 6px) rgba(0, 0, 0, .82),
+    0 0 var(--text-shadow-glow, 8px) rgba(0, 0, 0, var(--text-shadow-glow-a, .16));
+}
+/* 卡拉OK逐字：未唱到的字變淡，唱到就點亮（平滑漸變） */
+.lyrics__cur.karaoke .kchar {
+  opacity: 0.4;
+  transition: opacity 0.18s ease;
+}
+.lyrics__cur.karaoke .kchar.sung {
+  opacity: 1;
+}
+/* 流動填色與逐字點亮可同時存在。比例只由真實 YRC 字詞時間寫入，
+   未取得逐字時間時不會套用這個類別。 */
+.lyrics__cur.highlight-fill .lyrics__txt {
+  position: relative;
+  color: var(--lyric-fill-base, #fff);
+  -webkit-text-fill-color: var(--lyric-fill-base, #fff);
+}
+.lyrics__cur.highlight-fill .lyrics__txt::after {
+  content: attr(data-lyric);
+  position: absolute;
+  inset: 0;
+  display: block;
+  color: var(--glow, #8ec8ff);
+  -webkit-text-fill-color: var(--glow, #8ec8ff);
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
+  pointer-events: none;
+  clip-path: inset(0 calc(100% - var(--lyric-fill, 0%)) 0 0);
+  will-change: clip-path;
+}
+/* 內容容器：歌名在上（靠左），下面才是唱片 + 歌詞 */
+.content { display: flex; flex-direction: column; }
+
+/* 歌名：左上角小字，不與歌詞或唱片重疊 */
+.songname {
+  align-self: flex-start;
+  max-width: 100%;
+  text-align: left;
+  padding-left: 2px;
+  opacity: var(--name-a, 0.62);
+  color: var(--name-c, #fff) !important;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.62);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  paint-order: stroke fill;
+  -webkit-text-stroke: var(--text-stroke, .04em) rgba(0, 0, 0, 0.85);
+  text-shadow: 0 1px var(--text-shadow-mid, 6px) rgba(0, 0, 0, 0.9);
+  margin-bottom: 1px;
+}
+
+/* 雙語第二行：翻譯（比原文小、稍淡，同樣有描邊） */
+.lyrics__trans {
+  /* 翻譯同樣不截斷 */
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-weight: 700;
+  line-height: 1.3;
+  opacity: 0.88;
+  text-align: center;
+  paint-order: stroke fill;
+  -webkit-text-stroke: var(--text-stroke, .05em) rgba(0, 0, 0, 0.9);
+  text-shadow:
+    0 0 var(--text-shadow-near, 3px) rgba(0, 0, 0, 0.95),
+    0 2px var(--text-shadow-mid, 7px) rgba(0, 0, 0, 0.75);
+  margin-top: var(--lyric-trans-gap, 7px);
+}
+
+/* 進度列（進度條 + 時間） */
+.progrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  transition: opacity 0.2s ease;
+  margin-top: var(--trans-progress-gap, 7px);
+}
+.progress {
+  flex: 1;
+  height: 3px;
+  border-radius: 4px;
+  /* 未播放區可見度可調 */
+  background: transparent;
+  overflow: visible;
+  transition: height 0.18s ease, box-shadow 0.18s ease;
+}
+.progress__motion {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  transform-origin: center;
+}
+.progress__track {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: rgba(255,255,255,var(--bar-track-a,.28));
+}
+.progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  /* 已播放區可見度可調 */
+  opacity: var(--bar-fill-a, 1);
+}
+
+/* RGB 只負責上色；高度沿用使用者的 --bar-h 設定。 */
+.progress.rgb .progress__fill {
+  background: linear-gradient(90deg, #ff3d81, #ff9f1c, #ffe74c, #37e57a, #2ec4ff, #8a5cff, #ff3d81);
+  background-size: 300% 100%;
+  /* 使用者設定 × 動畫倍率：相乘而非互相覆寫，
+     跳動的瞬間仍會保留你調的飽和度/亮度 */
+  filter:
+    saturate(calc(var(--rgb-sat, 1) * var(--f-sat, 1)))
+    brightness(calc(var(--rgb-bright, 1) * var(--f-bright, 1)));
+}
+@keyframes rgbflow { to { background-position: 300% 0; } }
+
+/* ---- RGB 模式 ---- */
+/* 呼吸：單一漸層明暗脈動 */
+.rgb-breath .progress.rgb .progress__fill {
+  background: linear-gradient(90deg, var(--neon), #ffffff, var(--neon));
+  background-size: 200% 100%;
+}
+@keyframes breathe { 0%,100%{opacity:.55} 50%{opacity:1} }
+/* 單色霓虹 */
+.rgb-neon .progress.rgb .progress__fill {
+  background: linear-gradient(90deg, var(--neon), color-mix(in srgb, var(--neon) 55%, #fff), var(--neon));
+  background-size: 220% 100%;
+}
+/* 隨專輯配色 */
+.rgb-cover .progress.rgb .progress__fill {
+  background: linear-gradient(90deg, var(--c1), var(--c2), var(--c3), var(--c1));
+  background-size: 300% 100%;
+}
+
+/* 光暈外溢：燈條打在玻璃上 */
+.fx-glow .progress.rgb .progress__fill {
+  box-shadow:
+    0 0 8px rgba(255, 120, 200, .75),
+    0 0 16px rgba(90, 190, 255, .55),
+    0 0 30px rgba(160, 120, 255, .35);
+}
+.fx-glow.rgb-neon .progress.rgb .progress__fill,
+.fx-glow.rgb-breath .progress.rgb .progress__fill {
+  box-shadow: 0 0 10px var(--neon), 0 0 24px var(--neon);
+}
+.fx-glow.rgb-cover .progress.rgb .progress__fill {
+  box-shadow: 0 0 10px var(--c1), 0 0 24px var(--c2);
+}
+
+/* ============ 動畫合成層 ============
+   多個特效若各自直接寫 transform / filter，後套用的會整個覆寫前者
+   （例：換句放大 vs 3D 傾斜；跳動亮度 vs 使用者的飽和度設定）。
+   解法：每個特效只負責自己的「一個變數」，最終在同一條 transform /
+   filter 裡合成。變數用 @property 註冊才能被動畫平滑過渡。 */
+@property --t-scale   { syntax: '<number>'; initial-value: 1; inherits: false; }
+@property --t-rot     { syntax: '<angle>';  initial-value: 0deg; inherits: false; }
+@property --f-bright  { syntax: '<number>'; initial-value: 1; inherits: false; }
+@property --f-sat     { syntax: '<number>'; initial-value: 1; inherits: false; }
+@property --v-scale   { syntax: '<number>'; initial-value: 1; inherits: false; }
+
+/* 玻璃：抗鋸齒圖層 + 3D 傾斜 + 換句縮放，三者合成不互相覆寫 */
+.capsule .glass, .capsule .plain {
+  transform: translateZ(0) perspective(700px) rotateX(var(--t-rot, 0deg)) scale(var(--t-scale, 1));
+}
+/* 唱片：抗鋸齒圖層 + 換句彈跳 */
+.capsule .vinyl { transform: translateZ(0) scale(var(--v-scale, 1)); }
+
+/* 換句：玻璃呼吸（只動 --t-scale） */
+.glass.breathe, .plain.breathe { animation: pillbreathe .56s cubic-bezier(.34,1.5,.5,1); }
+@keyframes pillbreathe {
+  0%   { --t-scale: 1; }
+  35%  { --t-scale: 1.045; }
+  100% { --t-scale: 1; }
+}
+/* 換句：唱片彈一下（只動 --v-scale） */
+.vinyl.bounce { animation: vinylbounce .52s cubic-bezier(.34,1.5,.5,1); }
+@keyframes vinylbounce {
+  0%   { --v-scale: 1; }
+  35%  { --v-scale: 1.16; }
+  100% { --v-scale: 1; }
+}
+/* 暫停時呼吸燈 */
+.fx-pausebreath .glass, .fx-pausebreath .plain { animation: pausebreath 2.6s ease-in-out infinite; }
+@keyframes pausebreath { 0%,100%{opacity:.72} 50%{opacity:1} }
+/* 唱到的字發光（顏色可調） */
+.fx-kglow .lyrics__cur.karaoke .kchar.sung {
+  text-shadow:
+    0 0 6px rgba(255,255,255,.9),
+    0 0 14px var(--glow, #8ec8ff),
+    0 2px 10px rgba(0,0,0,.9);
+}
+
+/* 換句過場動畫 */
+.anim-fade { animation: lnFade .42s ease-out; }
+.anim-up   { animation: lnUp .44s cubic-bezier(.22,1,.36,1); }
+.anim-zoom { animation: lnZoom .44s cubic-bezier(.34,1.4,.5,1); }
+@keyframes lnFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes lnUp   { from { opacity: 0; transform: translateY(.5em) } to { opacity: 1; transform: none } }
+@keyframes lnZoom { from { opacity: 0; transform: scale(.9) } to { opacity: 1; transform: none } }
+
+/* 藥丸隨滑鼠 3D 傾斜（滑鼠在藥丸上時才作用） */
+/* 3D 傾斜：只動 --t-rot，不直接寫 transform（避免蓋掉換句縮放） */
+.fx-tilt .glass { transition: --t-rot .18s ease-out; transform-style: preserve-3d; }
+.fx-tilt:hover .glass { --t-rot: 3deg; }
+
+/* 歌名位置：上左/上中/上右/下左/下右 */
+.name-tl .songname { align-self: flex-start; }
+.name-tc .songname { align-self: center; }
+.name-tr .songname { align-self: flex-end; }
+.name-bl .content, .name-bc .content, .name-br .content { flex-direction: column-reverse; }
+.name-bl .songname { align-self: flex-start; margin: 2px 0 0; }
+.name-bc .songname { align-self: center; margin: 2px 0 0; }
+.name-br .songname { align-self: flex-end; margin: 2px 0 0; }
+
+/* 進度條：波浪特效 / 方角 */
+.progress.square, .progress.square .progress__motion, .progress.square .progress__fill { border-radius: 2px; }
+
+/* 抗鋸齒：藥丸邊緣的像素感來自合成層在圓角處的取樣。
+   拉出獨立圖層 + 極輕微外擴遮罩，邊緣就會平滑。 */
+/* 抗鋸齒：translateZ 已併入合成層的 transform，這裡只處理遮罩與背面隱藏，
+   不再自己寫 transform（否則會蓋掉傾斜與換句縮放）。 */
+.fx-smooth .glass {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-mask-image: radial-gradient(#000, #000);
+  mask-image: radial-gradient(#000, #000);
+}
+.fx-smooth .vinyl__ring,
+.fx-smooth .vinyl__disc,
+.fx-smooth .vinyl__art,
+.fx-smooth .vinyl-frame { backface-visibility: hidden; }
+
+/* 進度條粗細、唱片轉速、字重（由變數控制） */
+.progress { height: var(--bar-h, 3px); }
+.progress.rgb { height: var(--bar-h, 5px); }
+.vinyl.spin .vinyl__disc,
+.vinyl.spin .vinyl__art--default,
+.vinyl--framed.spin .vinyl__art--framed { animation-duration: var(--rpm, 4.5s); }
+.lyrics__txt { font-weight: var(--fw, 800); }
+
+/* 換句時跳動一下（與 RGB 上色是獨立設定，只開跳動也有效）。
+   動在外層，持續模式動在 progress__motion，兩者不會覆蓋 transform。 */
+.progress.beat { animation: lineBeat .48s ease-out; }
+@keyframes lineBeat { 0%{transform:scaleY(1.7);filter:brightness(1.8)} 100%{transform:scaleY(1);filter:brightness(1)} }
+
+/* ============ 進度條動畫系統 ============
+   RGB 只決定配色；prog-* 才決定動畫。所有模式在暫停時停止。 */
+.progress { position: relative; }
+.progress__fill { position: relative; z-index: 1; }
+.progress.bar-glow {
+  box-shadow: 0 0 var(--prog-glow-range, 12px)
+    color-mix(in srgb, var(--glow, #8ec8ff) calc(var(--prog-glow, .65) * 100%), transparent);
+}
+
+/* 真正分段：每段是可獨立標記與動畫的節點，不再用連續 bar 的遮罩偽裝。 */
+.progress.segmented { background: transparent; }
+.progress.segmented .progress__track { display: none; }
+.progress.segmented .progress__fill { display: none; }
+.progress__segments {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(var(--seg-count, 12), minmax(0, 1fr));
+  gap: var(--seg-gap, 3px);
+}
+.progress__segment {
+  display: block;
+  min-width: 0;
+  border-radius: var(--seg-radius, 3px);
+  background: rgba(255,255,255,var(--bar-track-a,.28));
+  opacity: 1;
+  transform-origin: center bottom;
+}
+.progress__segment.played {
+  background: rgba(255,255,255,var(--bar-fill-a,1));
+}
+.progress.rgb .progress__segment.played {
+  background: hsl(calc(var(--seg-index) * 360 / var(--seg-count, 12)) 92% 64%);
+  filter: saturate(var(--rgb-sat,1)) brightness(var(--rgb-bright,1));
+}
+.rgb-neon .progress.rgb .progress__segment.played,
+.rgb-breath .progress.rgb .progress__segment.played { background: var(--neon,#4f8cff); }
+.rgb-cover .progress.rgb .progress__segment.played {
+  background: linear-gradient(90deg,var(--c1),var(--c2),var(--c3));
+}
+
+/* 1. 平滑流動：只替單色建立亮度帶；RGB 保留自己的配色。 */
+.progress.prog-flow:not(.rgb) .progress__fill {
+  background-image: linear-gradient(90deg, rgba(255,255,255,.62), #fff, rgba(255,255,255,.62));
+  background-size: 220% 100%;
+}
+.progress.prog-flow.rgb .progress__fill { background-size: 300% 100%; }
+.progress.prog-flow .progress__motion { opacity: calc(.65 + var(--prog-strength,.55) * .35); }
+.progress.prog-flow.live .progress__fill { animation: rgbflow var(--prog-dur, 2.4s) linear infinite; }
+.progress.prog-flow.live .progress__segment.played {
+  animation: segmentFlow var(--prog-dur,2.4s) ease-in-out infinite alternate;
+  animation-delay: calc(var(--seg-index) * -45ms);
+}
+@keyframes segmentFlow { from{opacity:calc(1 - var(--prog-strength,.55) * .7)} to{opacity:1} }
+
+/* 2. 呼吸：只改亮度與透明度。 */
+.progress.prog-breathe.live .progress__motion { animation: progBreathe var(--prog-dur, 2.4s) ease-in-out infinite; }
+@keyframes progBreathe {
+  0%,100% { opacity: calc(.55 + var(--prog-strength, .55) * .2); filter: brightness(.85); }
+  50% { opacity: 1; filter: brightness(calc(1 + var(--prog-strength, .55))); }
+}
+
+/* 3. 整體脈衝：整條高度等比例呼吸。 */
+.progress.prog-pulse.live .progress__motion { animation: progPulse var(--prog-dur, 2.4s) var(--prog-ease, ease-in-out) infinite; }
+@keyframes progPulse { 0%,100%{transform:scaleY(1)} 50%{transform:scaleY(calc(1 + var(--prog-strength, .55) * .8))} }
+
+/* 6. 彈跳。 */
+.progress.prog-bounce.live .progress__motion { overflow: visible; animation: progBounce var(--prog-dur, 2.4s) var(--prog-ease, cubic-bezier(.34,1.5,.5,1)) infinite; }
+@keyframes progBounce { 0%,100%{transform:translateY(0)} 45%{transform:translateY(calc(-1 * var(--prog-bounce, 4px)))} 65%{transform:translateY(calc(var(--prog-bounce, 4px) * .28))} }
+
+/* 11. 分段跳動。 */
+.progress.prog-segments.live .progress__segment {
+  animation: progSegments var(--prog-dur, 2.4s) ease-in-out infinite;
+  animation-delay: calc(var(--seg-index) * -70ms);
+}
+@keyframes progSegments { 0%,100%{transform:scaleY(calc(1 - var(--prog-strength,.55) * .72));opacity:.68} 50%{transform:scaleY(1);opacity:1} }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress.live, .progress.live .progress__fill { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
+.progtime {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+
+/* 內容列：頭像 + 字幕 */
+.row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 唱片式歌手頭像：黑膠碟 + 彩色外圈 + 中央頭像標籤 */
+.vinyl {
+  flex: none;
+  position: relative;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  /* 中性外光暈：讓唱片在任何桌布上都浮得出來，但不搶眼 */
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.75));
+}
+/* 金色外圈（唱片邊緣鑲金） */
+.vinyl__ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(
+    #6b4f22, #d9b96b, #f6e3ac, #c9a352, #8a6a2f, #f0d999, #b9903f, #6b4f22);
+}
+/* 黑膠碟面（細密溝紋 + 光澤反射） */
+.vinyl__disc {
+  position: absolute; inset: 5%; border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%,
+      rgba(255,255,255,0.075) 0 1px, rgba(0,0,0,0) 1px 2.5px),
+    conic-gradient(from 210deg,
+      rgba(255,255,255,0.10) 0deg, rgba(255,255,255,0) 40deg,
+      rgba(255,255,255,0.07) 180deg, rgba(255,255,255,0) 220deg,
+      rgba(255,255,255,0.10) 360deg),
+    radial-gradient(circle at 38% 30%, #2e2e2e 0%, #151515 45%, #050505 100%);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.95);
+}
+/* 中央標籤：金環包裹歌手/專輯圖 */
+.vinyl__art {
+  will-change: transform;
+  contain: paint;
+  backface-visibility: hidden;
+  position: absolute;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.vinyl__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vinyl__art--default {
+  width: 50%;
+  height: 50%;
+  background: linear-gradient(140deg, #f3dfa8, #c9a352);
+  /* 金環 + 外側暗邊，像實體唱片標籤 */
+  box-shadow:
+    0 0 0 2.5px #e8c877,
+    0 0 0 5px rgba(0, 0, 0, 0.5);
+}
+.vinyl__art--framed {
+  z-index: 1;
+  width: calc(var(--vinyl-cover-scale, 0.5) * 100%);
+  height: calc(var(--vinyl-cover-scale, 0.5) * 100%);
+  background: transparent;
+  box-shadow: none;
+}
+.vinyl-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+.vinyl--framed .vinyl__ring,
+.vinyl--framed .vinyl__disc,
+.vinyl--framed .vinyl__art--default { display: none; }
+.vinyl--framed .vinyl-frame { z-index: 2; }
+.vinyl__ph {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  color: rgba(60, 40, 0, 0.85); font-size: 16px; font-weight: 800;
+}
+/* 中心孔已移除：它會蓋住歌手頭像正中央 */
+/* 播放時整張唱片旋轉 */
+.vinyl.spin .vinyl__disc,
+.vinyl.spin .vinyl__art--default,
+.vinyl--framed.spin .vinyl__art--framed { animation: discspin var(--rpm, 4.5s) linear infinite; }
+@keyframes discspin { to { transform: rotate(360deg); } }
+@keyframes ringspin { to { transform: rotate(360deg); } }
+
+/* 透明模式：沒有玻璃底，字加強描邊讓任何桌布都看得清 */
+.capsule--avatar .plain { padding: 0; }
+.capsule--avatar .lyrics__cur {
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.95),
+    1px 1px 0 rgba(0, 0, 0, 0.55),
+    -1px 1px 0 rgba(0, 0, 0, 0.55);
+}
+.capsule--avatar .progtime { text-shadow: 0 1px 8px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.9); }
+
+/* ===================== 控制台視窗 ===================== */
+body[data-route="console"] { background: transparent; }
+.style-offer {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid rgba(150,190,255,.26);
+  border-radius: 14px;
+  background: rgba(110,145,220,.10);
+}
+.style-offer .actions { display: flex; gap: 8px; margin-top: 9px; }
+.style-offer .actions .btn { margin: 0; flex: 1; }
+
+.cw {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  color: var(--ui-fg);
+}
+/* 磨砂玻璃面板（不是 LiquidGlass；避免蓋住內容） */
+.cw__scene {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(160deg, #1b1233 0%, #0c1120 55%, #0a1526 100%);
+}
+/* 液態玻璃面板：厚玻璃 + 上緣高光 + 內側描邊 */
+.cw__panel {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,.04) 22%, rgba(255,255,255,0) 46%),
+    linear-gradient(160deg, rgba(120,150,255,.10), rgba(180,120,255,.07) 55%, rgba(90,200,255,.10));
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.42),
+    inset 0 0 0 1px rgba(255,255,255,.13),
+    inset 0 -30px 60px rgba(255,255,255,.04);
+  overflow: hidden;
+}
+.cw__head, .tabs, .cw__body { position: relative; z-index: 1; }
+.cw__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 15px;
+  border-bottom: 1px solid var(--ui-border);
+  -webkit-app-region: drag;
+}
+.cw__head .tbtn { -webkit-app-region: no-drag; }
+.cw__body {
+  flex: 1;
+  padding: 8px 16px 18px;
+  overflow-y: auto;
+}
+.cw__body::-webkit-scrollbar { width: 8px; }
+.cw__body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 8px; }
+
+/* 外觀分頁的即時預覽 */
+.preview {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  isolation: isolate;
+  height: 100px;
+  margin: 0 0 6px;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ui-border);
+}
+.preview__effect-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.preview__content {
+  position: relative;
+  z-index: 1;
+}
+.preview__bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #26305a 0%, #0e1330 55%, #3a1f4d 100%);
+}
+
+.tabs { display: flex; gap: 6px; padding: 8px 12px 0; }
+/* 玻璃分頁 */
+.tab {
+  flex: 1;
+  padding: 9px 6px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.04));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.3);
+  color: var(--ui-fg);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .18s ease, box-shadow .18s ease;
+}
+.tab:hover { background: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.07)); }
+.tab.on {
+  background: linear-gradient(180deg, rgba(140,175,255,.5), rgba(120,140,255,.26));
+  border-color: rgba(180,205,255,.6);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 0 14px rgba(120,160,255,.35);
+}
+
+/* 房間 */
+.field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; margin: 7px 0; font-size: 12.5px; }
+.field span { color: rgba(255,255,255,0.85); }
+.field input {
+  height: 30px; border-radius: 8px; border: 1px solid var(--ui-border);
+  background: rgba(0,0,0,0.3); color: var(--ui-fg); padding: 0 10px; font-size: 13px;
+}
+.kv { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; border-bottom: 1px dashed rgba(255,255,255,0.12); }
+.kv span { color: rgba(255,255,255,0.6); }
+.members { list-style: none; margin: 6px 0; padding: 0; }
+.members li { padding: 6px 8px; border-radius: 8px; font-size: 13px; }
+.members li:nth-child(odd) { background: rgba(255,255,255,0.05); }
+.err { margin-top: 8px; color: #ff9a9a; font-size: 12.5px; }
+.ok { margin-top: 8px; color: #7ee0a0; font-size: 12.5px; }
+
+/* 小提示文字 */
+.tip {
+  margin: 4px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 開關列 */
+.tgl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.tgl__txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tgl__label { font-size: 13px; color: rgba(255, 255, 255, 0.94); }
+.tgl__hint { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
+/* 滑動開關 */
+.sw {
+  flex: none;
+  width: 42px; height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.18);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.sw.on { background: linear-gradient(90deg, #4f8cff, #8a5cff); }
+.sw__dot {
+  position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  transition: transform 0.2s cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.sw.on .sw__dot { transform: translateX(18px); }
+
+/* 摺疊區塊 */
+.sect { margin-top: 16px; }
+.sect__head {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.04));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28);
+  color: var(--ui-fg);
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.sect__head:hover { background: rgba(255, 255, 255, 0.11); }
+.sect__head.open { border-radius: 10px 10px 0 0; }
+.sect__arrow { color: rgba(255,255,255,0.6); }
+.sect__body {
+  padding: 8px 12px 14px;
+  border: 1px solid var(--ui-border);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+/* 點歌 */
+.searchbar { display: flex; gap: 8px; }
+.searchbar input {
+  flex: 1; height: 32px; border-radius: 8px; border: 1px solid var(--ui-border);
+  background: rgba(0,0,0,0.3); color: var(--ui-fg); padding: 0 10px; font-size: 13px;
+}
+.results { list-style: none; margin: 6px 0; padding: 0; }
+.results li {
+  display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; cursor: pointer;
+}
+.results li:hover { background: rgba(255,255,255,0.09); }
+.results img, .nowplaying img { width: 40px; height: 40px; border-radius: 7px; object-fit: cover; flex: none; }
+.results .meta { flex: 1; min-width: 0; }
+.results .meta b, .nowplaying b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub { font-size: 11.5px; color: rgba(255,255,255,0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results .play { color: #9ab8ff; }
+.profile-list li { cursor: default; }
+.mini-action {
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 7px;
+  padding: 4px 7px;
+  background: rgba(255,255,255,.08);
+  color: #cbd8ff;
+  cursor: pointer;
+}
+.mini-action:hover { background: rgba(255,255,255,.16); }
+.mini-action.danger { color: #ffaaaa; border-color: rgba(255,100,100,.25); }
+.nowplaying, .account { display: flex; align-items: center; gap: 10px; padding: 8px; background: rgba(255,255,255,0.06); border-radius: 10px; }
+.account img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+.account .meta { flex: 1; min-width: 0; }
+.privacy-flags { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 8px 0; font-size: 11px; color: rgba(255,255,255,.58); }
+.privacy-flags span { white-space: nowrap; }
+.qrbox { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; background: #fff; border-radius: 12px; }
+.qrbox img { width: 180px; height: 180px; }
+.qrbox .hint { color: #333; margin-top: 0; }
+.transport { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.transport input[type="range"] { flex: 1; accent-color: #7aa2ff; }
+.time { font-size: 11.5px; color: rgba(255,255,255,0.6); font-variant-numeric: tabular-nums; }
+.playlist-select, .playlist-target select {
+  min-width: 0; height: 32px; border-radius: 8px; border: 1px solid var(--ui-border);
+  background: rgba(5, 9, 24, 0.86); color: var(--ui-fg); padding: 0 9px;
+}
+.playlist-select { width: 100%; }
+.playlist-toolbar, .playlist-target { display: flex; align-items: center; gap: 7px; margin: 7px 0; }
+.playlist-toolbar .playlist-select, .playlist-target select { flex: 1; }
+.playlist-target span { color: rgba(255,255,255,.62); font-size: 12px; }
+.playlist-results { max-height: 240px; overflow-y: auto; }
+.playlist-results li { cursor: default; }
+.playlist-results .mini-action:disabled { opacity: .4; cursor: not-allowed; }
+.room-member-list li { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.member-permissions { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: rgba(255,255,255,.68); }
+.member-permissions label { display: inline-flex; align-items: center; gap: 4px; }
+.room-queue li { cursor: default; }
+.update-progress { position: relative; height: 20px; margin: 10px 0; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,.08); }
+.update-progress > div { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #70a7ff, #b982ff); transition: width .2s ease; }
+.update-progress > span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.update-notes { margin-top: 10px; padding: 10px; border: 1px solid var(--ui-border); border-radius: 10px; background: rgba(255,255,255,.05); }
+.update-notes p { margin: 6px 0 0; white-space: pre-wrap; color: rgba(255,255,255,.7); font-size: 12px; }
+
+.group {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.62);
+  text-transform: uppercase;
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr 118px 52px;
+  align-items: center;
+  gap: 8px;
+  margin: 7px 0;
+  font-size: 12.5px;
+}
+.row--check { grid-template-columns: 1fr auto 52px; }
+.row__label { color: rgba(255, 255, 255, 0.9); }
+.row__val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+}
+/* 玻璃滑桿 */
+.row input[type="range"] {
+  width: 100%;
+  -webkit-appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(0,0,0,.35), rgba(255,255,255,.08));
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.12);
+  outline: none;
+}
+.row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff, #cfd9ff);
+  box-shadow: 0 1px 4px rgba(0,0,0,.55), inset 0 -2px 3px rgba(120,140,200,.5), 0 0 8px rgba(140,175,255,.5);
+  cursor: pointer;
+}
+.row select,
+.row input[type="color"] {
+  width: 100%;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--ui-border);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--ui-fg);
+}
+.row input[type="color"] { padding: 2px; }
+
+.tbtn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ui-fg);
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tbtn:hover { background: var(--ui-glass-strong); }
+.tbtn.close:hover { background: rgba(255, 80, 80, 0.7); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  width: 100%;
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  background: var(--ui-glass);
+  color: var(--ui-fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--ui-glass-strong); }
+.btn.danger { border-color: rgba(255, 90, 90, 0.5); }
+.btn.danger:hover { background: rgba(255, 80, 80, 0.55); }
+.btn.file { flex: 1; margin-top: 0; }
+/* 快速預設按鈕列 */
+.presetrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.btn.preset { flex: 1 1 30%; margin-top: 0; padding: 7px 6px; font-size: 12px; }
+.filerow { display: flex; gap: 8px; margin-top: 6px; }
+
+.lyric-input {
+  width: 100%;
+  height: 84px;
+  margin-top: 10px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid var(--ui-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ui-fg);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+.hint {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.55);
+}

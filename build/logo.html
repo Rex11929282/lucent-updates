@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;background:transparent}
+  body{width:512px;height:512px;overflow:hidden}
+</style>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#1b1246"/>
+      <stop offset="55%" stop-color="#161a3d"/>
+      <stop offset="100%" stop-color="#0d1030"/>
+    </linearGradient>
+    <linearGradient id="pill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity=".42"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity=".10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity=".26"/>
+    </linearGradient>
+    <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#ff4d7e"/>
+      <stop offset="25%"  stop-color="#ffb347"/>
+      <stop offset="50%"  stop-color="#4ce6a1"/>
+      <stop offset="75%"  stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity=".55"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+  </defs>
+
+  <!-- 底：圓角方 -->
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="url(#bg)"/>
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="none"
+        stroke="rgba(255,255,255,.10)" stroke-width="2"/>
+
+  <!-- 光暈 -->
+  <ellipse cx="256" cy="250" rx="180" ry="96" fill="#6d5cff" opacity=".30" filter="url(#soft)"/>
+
+  <!-- 折射光譜（穿過玻璃藥丸的光） -->
+  <g opacity=".92">
+    <rect x="96" y="243" width="320" height="9" rx="4.5" fill="url(#spectrum)" opacity=".95"/>
+    <rect x="96" y="243" width="320" height="9" rx="4.5" fill="url(#spectrum)" filter="url(#soft)" opacity=".7"/>
+  </g>
+
+  <!-- 玻璃藥丸 -->
+  <g>
+    <rect x="86" y="186" width="340" height="128" rx="64" fill="url(#pill)"/>
+    <rect x="86" y="186" width="340" height="128" rx="64" fill="none"
+          stroke="rgba(255,255,255,.72)" stroke-width="3"/>
+    <!-- 上緣高光 -->
+    <rect x="102" y="196" width="308" height="52" rx="26" fill="url(#sheen)"/>
+  </g>
+
+  <!-- 音符 -->
+  <g fill="#ffffff">
+    <rect x="286" y="212" width="10" height="74" rx="5"/>
+    <ellipse cx="272" cy="288" rx="24" ry="18" transform="rotate(-16 272 288)"/>
+    <path d="M292 214 q34 6 46 22 q-14 -6 -46 -2 z"/>
+  </g>
+
+  <!-- 底部進度條意象 -->
+  <rect x="150" y="352" width="212" height="12" rx="6" fill="rgba(255,255,255,.16)"/>
+  <rect x="150" y="352" width="132" height="12" rx="6" fill="url(#spectrum)"/>
+</svg>

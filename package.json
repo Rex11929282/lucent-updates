@@ -1,0 +1,39 @@
+{
+  "name": "lucent-lyrics",
+  "private": true,
+  "version": "1.0.3",
+  "lucent": {
+    "nonCommercialDevelopment": true
+  },
+  "description": "璃音 Lucent — 懸浮桌面的液態玻璃音樂字幕",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "test": "node --test tests/appearanceModel.test.mjs tests/progressRuntime.test.mjs tests/clickThrough.test.mjs tests/stateMigration.test.cjs tests/roomStyle.test.cjs tests/roomOffers.test.cjs tests/roomCommands.test.cjs tests/roomPolicy.test.cjs tests/roomQueueWiring.test.mjs tests/roomLeave.test.mjs tests/roomReconnect.test.cjs tests/styleOffer.test.cjs tests/songSwitch.test.cjs tests/songDisplay.test.mjs tests/decorativeParticles.test.mjs tests/decorationRuntime.test.mjs tests/lyricMirror.test.cjs tests/ncmcdpBinding.integration.test.cjs tests/frameAssets.test.mjs tests/songTransition.test.mjs tests/songLifecycle.test.cjs tests/pillMouse.test.mjs tests/playbackCoordinator.test.cjs tests/playbackMainWiring.test.cjs tests/retiredAppearanceSettings.test.mjs tests/internalPlayerState.test.cjs tests/playerPolicy.test.cjs tests/audioServiceWiring.test.mjs tests/credentialStore.test.cjs tests/localPlaylistStore.test.cjs tests/neteasePlaylists.test.cjs tests/playlistWiring.test.mjs tests/musicProvider.test.cjs tests/updateConfig.test.cjs tests/updateService.test.cjs tests/updateWiring.test.mjs tests/privacyService.test.cjs tests/privacyWiring.test.mjs tests/releasePreflight.test.cjs tests/stageUpdateFeed.test.cjs",
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build": "vite build",
+    "start": "cross-env NODE_ENV=production electron .",
+    "preview": "npm run build && npm run start",
+    "test:room-reconnect:runtime": "node tests/electronRoomReconnectSmoke.cjs",
+    "release:check": "node scripts/releasePreflight.cjs",
+    "stage:update-feed": "node scripts/stageUpdateFeed.cjs",
+    "dist": "npm run release:check && vite build && electron-builder --config electron-builder.config.cjs --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "liquid-glass-react": "^1.1.1",
+    "NeteaseCloudMusicApi": "^4.32.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "43.4.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.0",
+    "wait-on": "^8.0.1"
+  }
+}

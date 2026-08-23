@@ -1,0 +1,16 @@
+node_modules/
+dist/
+release/
+.tmp-*/
+.qa-*/
+.claude/
+*.log
+*.exe
+*.blockmap
+*.asar
+*.zip
+*.pem
+*.pfx
+*.key
+.env
+.env.*
