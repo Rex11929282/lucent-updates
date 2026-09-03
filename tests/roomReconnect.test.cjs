@@ -74,7 +74,13 @@ test('console exposes a Traditional Chinese reconnecting notice without local-so
   const root = path.join(__dirname, '..')
   const ui = fs.readFileSync(path.join(root, 'src', 'ConsoleWindow.jsx'), 'utf8')
   const main = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
-  assert.match(ui, /正在重新連線/)
+  assert.match(ui, /t\('ui\.room\.reconnecting'/)
   assert.match(ui, /status\.reconnecting/)
   assert.match(main, /playback\.setMode\('member'\)/)
+})
+
+test('member room snapshots keep the retained host state during reconnect', () => {
+  const root = path.join(__dirname, '..')
+  const main = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  assert.match(main, /state:\s*room\.mode === 'member'\s*\?\s*room\.state\s*:\s*playback\.current\(\)/)
 })

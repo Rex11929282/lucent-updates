@@ -21,8 +21,8 @@ test('privacy control is main-process mediated and exposes no local file paths',
 
 test('privacy UI explains that deletion only affects this computer', () => {
   const consoleSource = read('src/ConsoleWindow.jsx')
-  assert.match(consoleSource, /資料與隱私/)
-  assert.match(consoleSource, /只移除這台電腦上的璃音資料/)
-  assert.match(consoleSource, /不會刪除網易雲帳號或雲端歌單/)
-  assert.match(consoleSource, /主持房間時不能清除本機歌單/)
+  assert.match(consoleSource, /t\('ui\.privacy\.title'\)/)
+  assert.match(consoleSource, /t\('ui\.privacy\.hint'\)/)
+  assert.match(consoleSource, /t\('ui\.privacy\.hostWarning'\)/)
+  assert.match(consoleSource, /t\('ui\.privacy\.clearMessage'/)
 })

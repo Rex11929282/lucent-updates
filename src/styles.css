@@ -3,7 +3,17 @@
   --ui-glass: rgba(255, 255, 255, 0.10);
   --ui-glass-strong: rgba(255, 255, 255, 0.18);
   --ui-border: rgba(255, 255, 255, 0.24);
-  font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+  /* 字型後備：介面支援 11 種語言，缺了對應字型會出現豆腐字，
+     或更糟 —— 用中文字形去畫日文假名/漢字，字看起來是「錯的」而不是缺的。
+     順序：拉丁與西里爾 → 繁中 → 簡中 → 日文 → 韓文。
+     這些都是 Windows 內建字型，不需要額外安裝。 */
+  font-family:
+    "Segoe UI",
+    "Microsoft JhengHei", "Noto Sans TC",
+    "Microsoft YaHei", "Noto Sans SC",
+    "Yu Gothic UI", "Meiryo",
+    "Malgun Gothic",
+    system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -119,6 +129,49 @@ html, body, #root {
     /* 沒有封面時的中性霧面 */
     rgba(255,255,255, calc(var(--frost, 0.2) * 1.1));
 }
+/* 海浪是背景材質層，不是進度條：填滿高度只由真實播放比例驅動，
+   水面本身以 compositor transform 緩慢流動，暫停時停在目前位置。 */
+.ocean-wave {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: var(--ocean-opacity, .32);
+  contain: paint;
+}
+.ocean-wave__fill {
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(100% + var(--ocean-crest, 16px));
+  transform: translate3d(0, var(--ocean-offset, 100%), 0);
+  will-change: transform;
+}
+.ocean-wave__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.ocean-wave__ripple {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 18%;
+  width: 64%;
+  height: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--ocean-color, #45b9ff) 60%, white);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.ocean-wave__ripple.is-rippling { animation: oceanLineRipple .46s ease-out both; }
+@keyframes oceanLineRipple {
+  from { opacity: .7; transform: scaleX(.34); }
+  to { opacity: 0; transform: scaleX(1.5); }
+}
 .decoration-canvas {
   position: absolute;
   inset: 0;
@@ -189,20 +242,14 @@ html, body, #root {
   24%, 100% { transform: translate3d(calc(-100vw - var(--sheen-w, 34%)), -50%, 0); opacity: 0; }
 }
 .content-shell { position: relative; }
-.content--shatter-hidden { pointer-events: none; }
-.content--shatter-out { animation: particleContentOut .12s ease-out both; }
-.content--dormant { opacity: 0; }
-.content--shatter-in { animation: particleContentIn var(--particle-in-dur, .85s) ease-in-out both; }
-@keyframes particleContentOut { from { opacity: 1; } to { opacity: 0; } }
-@keyframes particleContentIn { 0%, 68% { opacity: 0; } 100% { opacity: 1; } }
+.content--shatter-hidden { opacity: 0; pointer-events: none; }
+.content--shatter-out,
+.content--dormant,
+.content--shatter-in { opacity: 0; }
 .capsule.effects-paused *,
 .capsule.effects-paused .glass,
 .capsule.effects-paused .plain {
   animation-play-state: paused !important;
-}
-.capsule.effects-paused .content--shatter-out,
-.capsule.effects-paused .content--shatter-in {
-  animation-play-state: running !important;
 }
 .capsule .glass:has(.content--shatter-hidden) {
   box-shadow: none !important;
@@ -278,22 +325,23 @@ html, body, #root {
     6px
     10px;
 }
-.songname, .row-wrap { position: relative; z-index: 1; }
+.songname-track, .row-wrap { position: relative; z-index: 1; }
 
 /* 字幕：固定、不滾動、最多兩行、完整；下方進度條 */
 .lyrics {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: var(--lyric-align-items, center);
   gap: 0;
-  text-align: center;
+  text-align: var(--lyric-text-align, center);
 }
 /* 至少兩行高（一行時置中留白），字多就往下長 → 保證完整顯示不截斷 */
 .lyrics__cur {
   min-height: 2.5em;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: var(--lyric-justify, center);
+  font-size: var(--lyric-main-size, 14px);
   opacity: var(--lyric-a, 1);
   padding: 0;
 }
@@ -303,9 +351,10 @@ html, body, #root {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+  font-family: var(--lyrics-font, system-ui, sans-serif);
   font-weight: 800;
-  line-height: 1.25;
-  letter-spacing: 0.01em;
+  line-height: var(--lyric-line-height, 1.25);
+  letter-spacing: var(--lyric-letter-spacing, .01em);
   /* 描邊：玻璃是透明的，沒有描邊時白字會被桌布吃掉。
      用多層陰影做出外框，任何背景（亮/暗/雜亂）都讀得清楚。 */
   paint-order: stroke fill;
@@ -317,7 +366,10 @@ html, body, #root {
   text-shadow:
     0 1px var(--text-shadow-near, 2px) rgba(0, 0, 0, .95),
     0 2px var(--text-shadow-mid, 6px) rgba(0, 0, 0, .82),
-    0 0 var(--text-shadow-glow, 8px) rgba(0, 0, 0, var(--text-shadow-glow-a, .16));
+    0 0 var(--text-shadow-glow, 8px) rgba(0, 0, 0, var(--text-shadow-glow-a, .16)),
+    0 0 var(--style-glow-blur, 0px) var(--style-glow-color, transparent);
+  transform: skewX(var(--text-slant, 0deg));
+  transform-origin: center;
 }
 /* 卡拉OK逐字：未唱到的字變淡，唱到就點亮（平滑漸變） */
 .lyrics__cur.karaoke .kchar {
@@ -327,52 +379,55 @@ html, body, #root {
 .lyrics__cur.karaoke .kchar.sung {
   opacity: 1;
 }
-/* 流動填色與逐字點亮可同時存在。比例只由真實 YRC 字詞時間寫入，
-   未取得逐字時間時不會套用這個類別。 */
-.lyrics__cur.highlight-fill .lyrics__txt {
-  position: relative;
-  color: var(--lyric-fill-base, #fff);
-  -webkit-text-fill-color: var(--lyric-fill-base, #fff);
+/* 每個字各自著色，視覺換行不會被整段矩形裁切同步染到下一行。 */
+.lyrics__cur.highlight-fill.highlight-fill-active .kchar {
+  color: color-mix(in srgb, var(--lyric-fill-base, #fff) calc(100% - var(--flow-fill, 0%)), var(--glow, #8ec8ff) var(--flow-fill, 0%));
+  -webkit-text-fill-color: color-mix(in srgb, var(--lyric-fill-base, #fff) calc(100% - var(--flow-fill, 0%)), var(--glow, #8ec8ff) var(--flow-fill, 0%));
+  transition: color .12s linear, -webkit-text-fill-color .12s linear;
 }
-.lyrics__cur.highlight-fill .lyrics__txt::after {
-  content: attr(data-lyric);
-  position: absolute;
-  inset: 0;
-  display: block;
-  color: var(--glow, #8ec8ff);
-  -webkit-text-fill-color: var(--glow, #8ec8ff);
-  font: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
-  text-align: inherit;
-  white-space: inherit;
-  overflow-wrap: inherit;
-  word-break: inherit;
-  pointer-events: none;
-  clip-path: inset(0 calc(100% - var(--lyric-fill, 0%)) 0 0);
-  will-change: clip-path;
+.lyrics__cur.flow-fill-cover.highlight-fill-active .kchar {
+  color: color-mix(in srgb, var(--lyric-fill-base, #fff) calc(100% - var(--flow-fill, 0%)), var(--lyric-fill-cover, var(--lyric-fill-c1, #fff)) var(--flow-fill, 0%));
+  -webkit-text-fill-color: color-mix(in srgb, var(--lyric-fill-base, #fff) calc(100% - var(--flow-fill, 0%)), var(--lyric-fill-cover, var(--lyric-fill-c1, #fff)) var(--flow-fill, 0%));
+  transition: color .12s linear, -webkit-text-fill-color .12s linear;
 }
 /* 內容容器：歌名在上（靠左），下面才是唱片 + 歌詞 */
 .content { display: flex; flex-direction: column; }
 
-/* 歌名：左上角小字，不與歌詞或唱片重疊 */
-.songname {
+/* 歌名軌道永遠保留：歌名顯示、隱藏或過長都不改變藥丸尺寸。 */
+.songname-track {
   align-self: flex-start;
-  max-width: 100%;
+  height: var(--songname-track-height, 16px);
+  min-height: var(--songname-track-height, 16px);
+  max-width: calc(100% - var(--song-corner-inset, 0px));
+  overflow: hidden;
+  margin-bottom: 1px;
+}
+.songname {
+  width: 100%;
+  height: 100%;
+  font-size: var(--songname-size, 12px);
   text-align: left;
   padding-left: 2px;
-  opacity: var(--name-a, 0.62);
+  opacity: var(--name-a, 0.86);
   color: var(--name-c, #fff) !important;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.62);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   paint-order: stroke fill;
   -webkit-text-stroke: var(--text-stroke, .04em) rgba(0, 0, 0, 0.85);
-  text-shadow: 0 1px var(--text-shadow-mid, 6px) rgba(0, 0, 0, 0.9);
-  margin-bottom: 1px;
+  text-shadow:
+    0 1px var(--text-shadow-near, 2px) rgba(0, 0, 0, 0.96),
+    0 2px var(--text-shadow-mid, 6px) rgba(0, 0, 0, 0.9);
+}
+.songname--empty { visibility: hidden; }
+.songname__text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: scaleX(var(--songname-scale, 1)) skewX(var(--songname-slant, 0deg));
+  transform-origin: left center;
 }
 
 /* 雙語第二行：翻譯（比原文小、稍淡，同樣有描邊） */
@@ -382,17 +437,45 @@ html, body, #root {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-weight: 700;
-  line-height: 1.3;
+  font-family: var(--translation-font, system-ui, sans-serif);
+  font-size: var(--translation-size, 10px);
+  font-weight: var(--translation-weight, 700);
+  line-height: var(--translation-line-height, 1.3);
+  letter-spacing: var(--translation-letter-spacing, 0em);
   opacity: 0.88;
-  text-align: center;
+  text-align: var(--lyric-text-align, center);
   paint-order: stroke fill;
   -webkit-text-stroke: var(--text-stroke, .05em) rgba(0, 0, 0, 0.9);
   text-shadow:
     0 0 var(--text-shadow-near, 3px) rgba(0, 0, 0, 0.95),
     0 2px var(--text-shadow-mid, 7px) rgba(0, 0, 0, 0.75);
   margin-top: var(--lyric-trans-gap, 7px);
+  transform: skewX(var(--translation-slant, 0deg));
+  transform-origin: center;
 }
+
+/* 文字風格僅改視覺，不建立計時器，也不接觸歌詞同步資料。 */
+.text-style-clean { --text-slant: 0deg; --translation-slant: 0deg; --songname-slant: 0deg; }
+.text-style-slant { --text-slant: 8deg; --translation-slant: 5deg; --songname-slant: 10deg; }
+.text-style-slant .lyrics__txt { filter: contrast(1.12); }
+.text-style-soft { --style-glow-color: color-mix(in srgb, var(--glow, #8ec8ff) 55%, transparent); --style-glow-blur: 16px; }
+.text-style-soft .lyrics__txt,
+.text-style-soft .lyrics__trans,
+.text-style-soft .songname { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--glow, #8ec8ff) 38%, transparent)); }
+.text-style-neon { --style-glow-color: var(--glow, #8ec8ff); --style-glow-blur: 22px; }
+.text-style-neon .lyrics__txt,
+.text-style-neon .lyrics__trans,
+.text-style-neon .songname { filter: drop-shadow(0 0 5px var(--glow, #8ec8ff)) drop-shadow(0 0 13px color-mix(in srgb, var(--glow, #8ec8ff) 72%, transparent)); }
+.text-style-metal .lyrics__txt,
+.text-style-metal .lyrics__trans,
+.text-style-metal .songname {
+  color: color-mix(in srgb, var(--name-c, #fff) 68%, #a8bfd5) !important;
+  filter: contrast(1.18) saturate(.74) drop-shadow(0 1px 0 rgba(255,255,255,.38));
+}
+
+.layout-compact .lyrics__cur { min-height: 1.4em; }
+.layout-concert .lyrics__cur { min-height: 2.8em; }
+.layout-bilingual .lyrics__trans { opacity: .96; }
 
 /* 進度列（進度條 + 時間） */
 .progrow {
@@ -434,7 +517,7 @@ html, body, #root {
   transform: scaleX(0);
   transform-origin: left center;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bar-fill-c,#ffffff);
   /* 已播放區可見度可調 */
   opacity: var(--bar-fill-a, 1);
 }
@@ -494,10 +577,18 @@ html, body, #root {
 @property --f-bright  { syntax: '<number>'; initial-value: 1; inherits: false; }
 @property --f-sat     { syntax: '<number>'; initial-value: 1; inherits: false; }
 @property --v-scale   { syntax: '<number>'; initial-value: 1; inherits: false; }
+@property --console-scale { syntax: '<number>'; initial-value: 1; inherits: false; }
 
 /* 玻璃：抗鋸齒圖層 + 3D 傾斜 + 換句縮放，三者合成不互相覆寫 */
 .capsule .glass, .capsule .plain {
-  transform: translateZ(0) perspective(700px) rotateX(var(--t-rot, 0deg)) scale(var(--t-scale, 1));
+  transform: translateZ(0) perspective(700px) rotateX(var(--t-rot, 0deg)) scale(var(--t-scale, 1)) scale(var(--console-scale, 1));
+  transition: transform 160ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease;
+}
+.capsule--console-collapsed .glass,
+.capsule--console-collapsed .plain {
+  --console-scale: .92;
+  opacity: 0 !important;
+  pointer-events: none;
 }
 /* 唱片：抗鋸齒圖層 + 換句彈跳 */
 .capsule .vinyl { transform: translateZ(0) scale(var(--v-scale, 1)); }
@@ -516,9 +607,15 @@ html, body, #root {
   35%  { --v-scale: 1.16; }
   100% { --v-scale: 1; }
 }
-/* 暫停時呼吸燈 */
-.fx-pausebreath .glass, .fx-pausebreath .plain { animation: pausebreath 2.6s ease-in-out infinite; }
-@keyframes pausebreath { 0%,100%{opacity:.72} 50%{opacity:1} }
+/* 暫停時整體平滑淡化／回復；只動既有內容合成層，不重算玻璃尺寸。 */
+.fx-pausebreath .content-shell {
+  animation: pausebreath 3.2s cubic-bezier(.45, 0, .55, 1) infinite;
+  will-change: opacity, filter;
+}
+@keyframes pausebreath {
+  0%, 100% { opacity: 1; filter: brightness(1); }
+  50% { opacity: .68; filter: brightness(.78); }
+}
 /* 唱到的字發光（顏色可調） */
 .fx-kglow .lyrics__cur.karaoke .kchar.sung {
   text-shadow:
@@ -532,8 +629,8 @@ html, body, #root {
 .anim-up   { animation: lnUp .44s cubic-bezier(.22,1,.36,1); }
 .anim-zoom { animation: lnZoom .44s cubic-bezier(.34,1.4,.5,1); }
 @keyframes lnFade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes lnUp   { from { opacity: 0; transform: translateY(.5em) } to { opacity: 1; transform: none } }
-@keyframes lnZoom { from { opacity: 0; transform: scale(.9) } to { opacity: 1; transform: none } }
+@keyframes lnUp   { from { opacity: 0; transform: translateY(.5em) skewX(var(--text-slant, 0deg)) } to { opacity: 1; transform: skewX(var(--text-slant, 0deg)) } }
+@keyframes lnZoom { from { opacity: 0; transform: scale(.9) skewX(var(--text-slant, 0deg)) } to { opacity: 1; transform: skewX(var(--text-slant, 0deg)) } }
 
 /* 藥丸隨滑鼠 3D 傾斜（滑鼠在藥丸上時才作用） */
 /* 3D 傾斜：只動 --t-rot，不直接寫 transform（避免蓋掉換句縮放） */
@@ -541,13 +638,18 @@ html, body, #root {
 .fx-tilt:hover .glass { --t-rot: 3deg; }
 
 /* 歌名位置：上左/上中/上右/下左/下右 */
-.name-tl .songname { align-self: flex-start; }
-.name-tc .songname { align-self: center; }
-.name-tr .songname { align-self: flex-end; }
-.name-bl .content, .name-bc .content, .name-br .content { flex-direction: column-reverse; }
-.name-bl .songname { align-self: flex-start; margin: 2px 0 0; }
-.name-bc .songname { align-self: center; margin: 2px 0 0; }
-.name-br .songname { align-self: flex-end; margin: 2px 0 0; }
+.name-tl .songname-track { --song-corner-inset: 32px; align-self: flex-start; margin-left: var(--song-corner-inset); }
+.name-tc .songname-track { align-self: center; }
+.name-tr .songname-track { --song-corner-inset: 32px; align-self: flex-end; margin-right: var(--song-corner-inset); }
+.name-bl .content, .name-br .content { flex-direction: column-reverse; }
+.name-bl .songname-track { --song-corner-inset: 32px; align-self: flex-start; margin: 2px 0 0 var(--song-corner-inset); }
+.name-bc .songname-track { align-self: center; margin: 4px 0 0; }
+.name-br .songname-track { --song-corner-inset: 32px; align-self: flex-end; margin: 2px var(--song-corner-inset) 0 0; }
+/* 演唱會置中字級較大、藥丸也較高；四角多留一級安全內距，避免歌名落入圓弧裁切。 */
+.layout-concert.name-tl .songname-track,
+.layout-concert.name-tr .songname-track,
+.layout-concert.name-bl .songname-track,
+.layout-concert.name-br .songname-track { --song-corner-inset: 52px; }
 
 /* 進度條：波浪特效 / 方角 */
 .progress.square, .progress.square .progress__motion, .progress.square .progress__fill { border-radius: 2px; }
@@ -610,7 +712,7 @@ html, body, #root {
   transform-origin: center bottom;
 }
 .progress__segment.played {
-  background: rgba(255,255,255,var(--bar-fill-a,1));
+  background: var(--bar-fill-c,#ffffff);
 }
 .progress.rgb .progress__segment.played {
   background: hsl(calc(var(--seg-index) * 360 / var(--seg-count, 12)) 92% 64%);
@@ -624,7 +726,7 @@ html, body, #root {
 
 /* 1. 平滑流動：只替單色建立亮度帶；RGB 保留自己的配色。 */
 .progress.prog-flow:not(.rgb) .progress__fill {
-  background-image: linear-gradient(90deg, rgba(255,255,255,.62), #fff, rgba(255,255,255,.62));
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--bar-fill-c,#ffffff) 62%, transparent), var(--bar-fill-c,#ffffff), color-mix(in srgb, var(--bar-fill-c,#ffffff) 62%, transparent));
   background-size: 220% 100%;
 }
 .progress.prog-flow.rgb .progress__fill { background-size: 300% 100%; }
@@ -716,7 +818,8 @@ html, body, #root {
   border-radius: 50%;
   overflow: hidden;
 }
-.vinyl__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vinyl__art img { width: 100%; height: 100%; object-fit: cover; display: block; animation: artworkFadeIn .22s ease-out; }
+@keyframes artworkFadeIn { from { opacity: 0; } to { opacity: 1; } }
 .vinyl__art--default {
   width: 50%;
   height: 50%;
@@ -730,6 +833,13 @@ html, body, #root {
   z-index: 1;
   width: calc(var(--vinyl-cover-scale, 0.5) * 100%);
   height: calc(var(--vinyl-cover-scale, 0.5) * 100%);
+  background: transparent;
+  box-shadow: none;
+}
+.vinyl__art--bare {
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   background: transparent;
   box-shadow: none;
 }
@@ -750,6 +860,10 @@ html, body, #root {
 .vinyl--framed .vinyl__disc,
 .vinyl--framed .vinyl__art--default { display: none; }
 .vinyl--framed .vinyl-frame { z-index: 2; }
+.vinyl--bare { filter: none; }
+.vinyl--bare .vinyl__ring,
+.vinyl--bare .vinyl__disc,
+.vinyl--bare .vinyl__art--default { display: none; }
 .vinyl__ph {
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
   color: rgba(60, 40, 0, 0.85); font-size: 16px; font-weight: 800;
@@ -759,6 +873,7 @@ html, body, #root {
 .vinyl.spin .vinyl__disc,
 .vinyl.spin .vinyl__art--default,
 .vinyl--framed.spin .vinyl__art--framed { animation: discspin var(--rpm, 4.5s) linear infinite; }
+.vinyl--bare.spin .vinyl__art--bare { animation: discspin var(--rpm, 4.5s) linear infinite; }
 @keyframes discspin { to { transform: rotate(360deg); } }
 @keyframes ringspin { to { transform: rotate(360deg); } }
 
@@ -839,33 +954,16 @@ body[data-route="console"] { background: transparent; }
   top: 0;
   z-index: 3;
   isolation: isolate;
-  height: 100px;
+  min-height: 128px;
   margin: 0 0 6px;
+  padding: 12px 8px;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--ui-border);
 }
-.preview__effect-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  overflow: hidden;
-  pointer-events: none;
-}
-.preview__content {
-  position: relative;
-  z-index: 1;
-}
-.preview__bg {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, #26305a 0%, #0e1330 55%, #3a1f4d 100%);
-}
-
 .tabs { display: flex; gap: 6px; padding: 8px 12px 0; }
 /* 玻璃分頁 */
 .tab {
@@ -969,11 +1067,166 @@ body[data-route="console"] { background: transparent; }
   background: rgba(0, 0, 0, 0.16);
 }
 
+/* 設定項目的白話說明：接在名稱底下，不佔額外一列，
+   關掉說明時整個版面會自動縮回原本的緊湊樣子。 */
+.row--hinted { align-items: start; }
+.row--hinted .row__label { display: grid; gap: 2px; padding-top: 1px; }
+.row--hinted input[type="range"],
+.row--hinted select,
+.row--hinted input[type="color"] { margin-top: 2px; }
+.row__hint {
+  /* The hint is a <small> nested inside the label span, so it is inline by
+     default and runs straight on from the label text. A short Chinese label
+     hides that, but "Язык интерфейса" and "表示言語" collide with their own
+     hint: "Язык интерфейсаИзменения применяются сразу…". The .row--hinted
+     modifier makes the label a grid, but not every hinted row carries it, so
+     force the break here instead of relying on the modifier being present. */
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--console-muted, rgba(255, 255, 255, 0.55));
+  white-space: normal;
+}
+.console-shell .row__hint { color: var(--console-muted); }
+
 /* 點歌 */
-.searchbar { display: flex; gap: 8px; }
+.searchbar { display: flex; gap: 8px; align-items: stretch; }
 .searchbar input {
-  flex: 1; height: 32px; border-radius: 8px; border: 1px solid var(--ui-border);
+  flex: 1; min-width: 0; height: 32px; border-radius: 8px; border: 1px solid var(--ui-border);
   background: rgba(0,0,0,0.3); color: var(--ui-fg); padding: 0 10px; font-size: 13px;
+}
+/* 動作按鈕的字不該被擠到換行；讓輸入框先讓位。
+   width:auto 是必要的 —— .btn 預設 width:100%，配上 flex:none 會讓按鈕
+   直接佔滿整條 flex 列，把輸入框壓成幾十 px。搜尋框「太小」的真正原因就是這個。 */
+.searchbar .btn { flex: none; width: auto; white-space: nowrap; }
+
+/* ---- 緊湊播放器 ----
+   一張卡片放完封面、歌名、歌手／專輯、歌手頭像、來源、狀態、
+   上一首／播放／下一首與進度條。刻意保持緊湊，不做成全螢幕播放器。 */
+.miniplayer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--console-line, rgba(255, 255, 255, .14));
+  border-radius: 18px;
+  background: var(--console-panel, rgba(255, 255, 255, .06));
+}
+.miniplayer__art { position: relative; width: 84px; height: 84px; flex: none; }
+.miniplayer__art img { width: 84px; height: 84px; border-radius: 14px; object-fit: cover; display: block; }
+.miniplayer__noart {
+  display: grid; place-items: center;
+  width: 84px; height: 84px; border-radius: 14px;
+  font-size: 30px;
+  color: var(--console-muted, rgba(255, 255, 255, .5));
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+/* 歌手頭像疊在封面右下角，跟專輯封面分開呈現 */
+.miniplayer__avatar {
+  position: absolute; right: -5px; bottom: -5px;
+  width: 32px !important; height: 32px !important;
+  border-radius: 50% !important;
+  border: 2px solid var(--console-panel, #fff);
+  object-fit: cover;
+}
+.miniplayer__body { display: grid; gap: 6px; min-width: 0; }
+.miniplayer__head { display: flex; align-items: baseline; gap: 8px; }
+.miniplayer__head b {
+  flex: 1; min-width: 0;
+  font-size: 15px; line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.miniplayer__state {
+  flex: none;
+  padding: 2px 9px; border-radius: 999px;
+  font-size: 11px;
+  color: var(--console-muted, rgba(255, 255, 255, .6));
+  border: 1px solid var(--console-line, rgba(255, 255, 255, .16));
+}
+.miniplayer__state.is-playing {
+  color: #2f9e6b;
+  border-color: color-mix(in srgb, #2f9e6b 45%, transparent);
+}
+.miniplayer__meta {
+  font-size: 12.5px; line-height: 1.4;
+  color: var(--console-muted, rgba(255, 255, 255, .62));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.miniplayer__album { opacity: .8; }
+.miniplayer__source { font-size: 11px; color: var(--console-muted, rgba(255, 255, 255, .48)); }
+.miniplayer__transport { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.miniplayer__transport .mini-action {
+  width: 38px; height: 34px;
+  display: grid; place-items: center;
+  font-size: 15px;
+}
+.miniplayer__play { flex: 1; width: auto; margin-top: 0; height: 34px; font-weight: 700; }
+.miniplayer__seek { display: flex; align-items: center; gap: 9px; }
+.miniplayer__seek span {
+  flex: none; min-width: 40px;
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
+  color: var(--console-muted, rgba(255, 255, 255, .6));
+}
+.miniplayer__seek span:last-child { text-align: right; }
+.miniplayer__seek input[type="range"] { flex: 1; min-width: 0; }
+.miniplayer__queue { font-size: 11px; color: var(--console-muted, rgba(255, 255, 255, .48)); }
+@media (max-width: 560px) {
+  .miniplayer { grid-template-columns: 1fr; }
+  .miniplayer__art { margin: 0 auto; }
+}
+
+/* ---- 歌曲搜尋 ----
+   原本沿用一般的小輸入框（32px / 13px），歌名擠在一條細縫裡很難讀。
+   放大的是輸入框與列高，不是把字縮小 —— 縮字只會更難讀。 */
+.searchbar--song { gap: 10px; margin-top: 4px; }
+.searchbar--song input {
+  height: 44px;
+  min-width: 0;
+  padding: 0 14px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+.searchbar--song input::placeholder { font-size: 14px; opacity: .7; }
+.searchbar--song .btn {
+  height: 44px;
+  min-width: 88px;
+  margin-top: 0;
+  padding: 0 18px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+/* 搜尋結果：封面放大、歌名可讀，長標題折兩行而不是切一半 */
+.results--song { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.results--song li { gap: 12px; padding: 10px; border-radius: 14px; align-items: center; }
+.results--song img,
+.results--song .results__noart { width: 52px; height: 52px; border-radius: 10px; flex: none; }
+.results--song .results__noart {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  color: var(--console-muted, rgba(255, 255, 255, .5));
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.results--song .meta { display: grid; gap: 3px; }
+.results--song .meta b {
+  font-size: 14.5px;
+  line-height: 1.35;
+  /* 長歌名折到第二行才截斷，比單行切掉好讀很多 */
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.results--song .sub { font-size: 12.5px; line-height: 1.4; }
+.results--song .btn { flex: none; width: auto; min-width: 72px; margin-top: 0; padding: 8px 14px; }
+@media (max-width: 620px) {
+  .searchbar--song { flex-wrap: wrap; }
+  .searchbar--song input { flex: 1 1 100%; }
+  .searchbar--song .btn { flex: 1 1 100%; }
 }
 .results { list-style: none; margin: 6px 0; padding: 0; }
 .results li {
@@ -982,7 +1235,7 @@ body[data-route="console"] { background: transparent; }
 .results li:hover { background: rgba(255,255,255,0.09); }
 .results img, .nowplaying img { width: 40px; height: 40px; border-radius: 7px; object-fit: cover; flex: none; }
 .results .meta { flex: 1; min-width: 0; }
-.results .meta b, .nowplaying b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results:not(.results--song) .meta b, .nowplaying b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub { font-size: 11.5px; color: rgba(255,255,255,0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .play { color: #9ab8ff; }
 .profile-list li { cursor: default; }
@@ -1000,7 +1253,7 @@ body[data-route="console"] { background: transparent; }
 .account img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 .account .meta { flex: 1; min-width: 0; }
 .privacy-flags { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 8px 0; font-size: 11px; color: rgba(255,255,255,.58); }
-.privacy-flags span { white-space: nowrap; }
+.privacy-flags span { white-space: normal; overflow-wrap:anywhere; }
 .qrbox { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; background: #fff; border-radius: 12px; }
 .qrbox img { width: 180px; height: 180px; }
 .qrbox .hint { color: #333; margin-top: 0; }
@@ -1012,8 +1265,8 @@ body[data-route="console"] { background: transparent; }
   background: rgba(5, 9, 24, 0.86); color: var(--ui-fg); padding: 0 9px;
 }
 .playlist-select { width: 100%; }
-.playlist-toolbar, .playlist-target { display: flex; align-items: center; gap: 7px; margin: 7px 0; }
-.playlist-toolbar .playlist-select, .playlist-target select { flex: 1; }
+.playlist-toolbar, .playlist-target { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 7px 0; }
+.playlist-toolbar .playlist-select, .playlist-target select { flex: 1 1 180px; }
 .playlist-target span { color: rgba(255,255,255,.62); font-size: 12px; }
 .playlist-results { max-height: 240px; overflow-y: auto; }
 .playlist-results li { cursor: default; }
@@ -1038,7 +1291,11 @@ body[data-route="console"] { background: transparent; }
 }
 .row {
   display: grid;
-  grid-template-columns: 1fr 118px 52px;
+  /* The control column was a hard 118px, which fits Chinese option text and
+     clips everything longer: "Полностью (ходит…", "システムに合わせ…",
+     "Português (Brasil)". Let it grow to its content and make the label column
+     give way — a label can wrap, a native <select> cannot. */
+  grid-template-columns: minmax(0, 1fr) minmax(118px, max-content) 52px;
   align-items: center;
   gap: 8px;
   margin: 7px 0;
@@ -1119,24 +1376,440 @@ body[data-route="console"] { background: transparent; }
 /* 快速預設按鈕列 */
 .presetrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .btn.preset { flex: 1 1 30%; margin-top: 0; padding: 7px 6px; font-size: 12px; }
-.filerow { display: flex; gap: 8px; margin-top: 6px; }
-
-.lyric-input {
-  width: 100%;
-  height: 84px;
-  margin-top: 10px;
-  resize: vertical;
-  border-radius: 10px;
-  border: 1px solid var(--ui-border);
-  background: rgba(0, 0, 0, 0.3);
-  color: var(--ui-fg);
-  padding: 8px 10px;
-  font-size: 12.5px;
-  font-family: inherit;
+/* 自己調出來的完整外觀，跟示範用的內建風格分開，佔滿一整列 */
+.btn.preset--own {
+  flex: 1 1 100%;
+  font-weight: 800;
+  letter-spacing: .04em;
+  border-color: color-mix(in srgb, var(--console-accent, #e8863f) 46%, transparent);
+  background: color-mix(in srgb, var(--console-accent, #e8863f) 12%, transparent);
 }
+.btn.preset--own:hover { background: color-mix(in srgb, var(--console-accent, #e8863f) 20%, transparent); }
+
 .hint {
   margin-top: 12px;
   font-size: 11px;
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.55);
 }
+
+/* 真實音訊頻譜：只由內建播放器傳來的 FFT 幀直接改變 CSS 變數，
+   不建立額外計時器，也不超出唱片與進度條自己的裁切範圍。 */
+.progress.prog-spectrum .progress__fill,
+.progress.prog-spectrum .progress__segments { display: none; }
+.progress.prog-spectrum .progress__track { background: rgba(255,255,255,var(--bar-track-a,.28)); }
+.progress__spectrum {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  align-items: end;
+  gap: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.progress__spectrum i {
+  display: block;
+  align-self: stretch;
+  min-width: 0;
+  height: 100%;
+  border-radius: inherit;
+  transform: scaleY(var(--spectrum-level, 0));
+  transform-origin: center bottom;
+  background: rgba(255,255,255,.34);
+  opacity: .72;
+}
+.progress__spectrum i.played {
+  background: rgba(255,255,255,var(--bar-fill-a,1));
+  opacity: 1;
+}
+.progress.prog-spectrum.rgb .progress__spectrum i.played {
+  background: hsl(calc(var(--spectrum-index, 0) * 360 / 16) 92% 64%);
+  filter: saturate(var(--rgb-sat,1)) brightness(var(--rgb-bright,1));
+}
+.rgb-neon .progress.prog-spectrum.rgb .progress__spectrum i.played,
+.rgb-breath .progress.prog-spectrum.rgb .progress__spectrum i.played { background: var(--neon,#4f8cff); }
+.rgb-cover .progress.prog-spectrum.rgb .progress__spectrum i.played {
+  background: linear-gradient(180deg, var(--c1), var(--c2), var(--c3));
+}
+/* 正式控制台：不透明的系統色介面，首頁以像素貓作為唯一的展示主角。 */
+.cw--console { position:relative; width:100vw; height:100vh; padding:14px; color:#183042; background:transparent; }
+.console-shell {
+  --console-surface:#f8fbff;
+  --console-bg: #f8fbff;
+  --console-panel: #ffffff;
+  --console-fg:#183042;
+  --console-muted: #698093;
+  --console-line: #dce7ef;
+  --console-accent: #e88648;
+  position:relative; display:flex; flex-direction:column; isolation:isolate;
+  width:100%; height:100%; min-height:0; overflow:hidden; border-radius:28px;
+  background:var(--console-surface); color:var(--console-fg); border:0;
+}
+.console-shell[data-console-theme="light"] { --console-surface:#fbfdff; --console-bg:var(--console-surface); }
+.console-shell[data-console-theme="dark"] { --console-surface:#17212b; --console-bg:var(--console-surface); --console-panel:#202d38; --console-fg:#edf7ff; --console-muted:#a9bac6; --console-line:#344756; }
+@media (prefers-color-scheme: dark) { .console-shell[data-console-theme="system"] { --console-surface:#17212b; --console-bg:var(--console-surface); --console-panel:#202d38; --console-fg:#edf7ff; --console-muted:#a9bac6; --console-line:#344756; } }
+.console-shell--dark { --console-bg:#17212b; --console-panel:#202d38; --console-muted:#a9bac6; --console-line:#344756; color:#edf7ff; }
+.console-shell--light { --console-bg:#fbfdff; }
+@media (prefers-color-scheme: dark) { .console-shell--system { --console-bg:#17212b; --console-panel:#202d38; --console-muted:#a9bac6; --console-line:#344756; color:#edf7ff; } }
+.console-shell__header {
+  height: 54px; padding: 0 18px; display:flex; align-items:center; gap:14px;
+  border-bottom: 1px solid var(--console-line); -webkit-app-region: drag;
+}
+.console-shell__header b { font-size:16px; letter-spacing:.02em; }
+.console-shell__header b i { color:var(--console-accent); font-style:normal; margin-right:7px; }
+.console-shell__header > span { margin-left:auto; color:var(--console-muted); font-size:12px; }
+.console-shell__header > span.is-playing { color:#34a875; }
+.console-shell__header .tbtn { -webkit-app-region:no-drag; color:inherit; }
+.console-shell__body { display:grid; grid-template-columns:164px minmax(0,1fr) minmax(280px,360px); grid-template-areas:"nav main panel"; flex:1; min-height:0; }
+.console-nav { grid-area:nav; padding:14px 10px; border-right:1px solid var(--console-line); display:grid; align-content:start; gap:7px; background:var(--console-surface); -webkit-app-region:no-drag; }
+.console-nav button { text-align:left; padding:10px 12px; color:var(--console-muted); background:transparent; border:1px solid transparent; border-radius:14px; transition:background .2s, color .2s, transform .2s; }
+.console-nav button:hover { transform:translateX(2px); color:inherit; background:color-mix(in srgb, var(--console-accent) 8%, transparent); }
+.console-nav button.active { color:#273d4c; background:#fff4ed; border-color:#f7d7c2; box-shadow:0 4px 12px rgba(215,116,54,.1); }
+.console-shell--dark .console-nav button.active { color:#fff3ec; background:rgba(232,134,72,.17); border-color:rgba(232,134,72,.35); }
+.console-nav b,
+.console-nav small { display:block; overflow-wrap:anywhere; }
+.console-nav b { font-size:13px; }
+.console-nav b i { display:inline-block; width:18px; color:var(--console-accent); font-style:normal; }
+.console-nav small { margin-top:2px; font-size:11px; opacity:.74; }
+.console-main { grid-area:main; min-width:0; overflow:auto; padding:28px 30px; background:var(--console-surface); -webkit-app-region:no-drag; }
+.console-shell__page { min-width:0; }
+.console-main::-webkit-scrollbar,.console-panel::-webkit-scrollbar { width:8px; }.console-main::-webkit-scrollbar-thumb,.console-panel::-webkit-scrollbar-thumb { background:var(--console-line); border-radius:999px; }
+.console-panel { grid-area:panel; min-width:0; overflow:auto; padding:18px 14px; border-left:1px solid var(--console-line); background:var(--console-panel); -webkit-app-region:no-drag; }
+.console-status-rail { padding:0; display:grid; align-content:start; gap:10px; background:transparent; }
+.console-status-rail section { display:grid; gap:4px; padding:12px; background:var(--console-panel); border:1px solid var(--console-line); border-radius:15px; }
+.console-status-rail > .card3d > .card3d__lift { display:grid; gap:4px; }
+.console-status-rail span { color:var(--console-muted); font-size:11px; }.console-status-rail b { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.console-status-rail b.ok { color:#31a56d; }.console-status-rail small { color:var(--console-muted); font-size:10px; line-height:1.35; }
+.console-status-rail__pill,.home-dashboard__pill { border:0; border-radius:13px; padding:10px 12px; background:#243e51; color:white; box-shadow:0 8px 15px rgba(36,62,81,.16); }
+.home-dashboard { display:grid; gap:20px; max-width:760px; margin:auto; }.home-dashboard__intro { display:flex; justify-content:space-between; gap:20px; align-items:center; }.home-dashboard__intro span { color:var(--console-accent); font-size:12px; font-weight:800; }.home-dashboard h1 { margin:4px 0 5px; font-size:26px; letter-spacing:-.04em; }.home-dashboard p { margin:0; color:var(--console-muted); font-size:13px; }
+.home-cat-stage { min-height:240px; position:relative; overflow:hidden; border:1px solid var(--console-line); border-radius:22px; background:linear-gradient(160deg,#fff4e4 0%,#fde5c8 48%,#f2d6bf 100%); isolation:isolate; }
+.home-cat-stage__sun { position:absolute; right:16%; top:26px; width:96px; height:96px; border-radius:50%; background:rgba(255,209,128,.56); filter:blur(2px); }.home-cat-stage__floor { position:absolute; inset:auto 0 28px; height:2px; background:rgba(123,74,49,.2); }
+/* 貓咪 sprite sheet：8 列動作 × 8 格，每格 32px，放大到 96px 顯示。
+   動作只由 CSS 變數決定（第幾列、播多快、循不循環），所以新增動作
+   不必再為它寫一組 @keyframes —— 舊版每個動作各自一組 keyframes，
+   是當初動作加不上去的主因。縱軸選動作、橫軸跑格數。 */
+.home-cat { position:absolute; bottom:28px; width:96px; height:96px; transform:translateX(-50%); pointer-events:none; transition:left var(--cat-travel,2200ms) cubic-bezier(.2,.75,.25,1); z-index:2; }
+.home-cat__sprite {
+  width:96px; height:96px;
+  background-image:url('/lucent-cat-sprite.png');
+  background-size:768px 768px;
+  background-repeat:no-repeat;
+  background-position-y:calc(var(--cat-row,0) * -96px);
+  image-rendering:pixelated;
+  transform:scaleX(var(--cat-facing));
+  animation:cat-frames var(--cat-ms,1600ms) steps(var(--cat-frames,8)) var(--cat-repeat,infinite);
+  animation-fill-mode:var(--cat-fill,none);
+}
+.home-cat--sleep .home-cat__sprite { opacity:.9; }
+.home-cat__food { position:absolute; bottom:34px; color:#73492d; font-size:24px; transform:translateX(-50%); }.home-cat__sleep { position:absolute; right:16%; top:42px; color:#a36e50; font-size:17px; letter-spacing:3px; animation:cat-sleep 1.6s ease-in-out infinite; }
+@keyframes cat-frames { from { background-position-x:0; } to { background-position-x:-768px; } }
+@keyframes cat-sleep { 50% { transform:translate(7px,-8px); opacity:.5; } }
+.home-dashboard__preview { padding:12px; border:1px solid var(--console-line); border-radius:20px; background:var(--console-panel); min-height:128px; display:grid; place-items:center; overflow:hidden; }
+.console-capsule-preview { position:relative; isolation:isolate; width:100%; max-width:100%; min-height:104px; height:104px; overflow:clip; }
+.console-capsule-preview__fit { position:absolute; inset:0; transform:scale(var(--preview-scale, 1)); transform-origin:center; }
+.console-capsule-preview .capsule--preview { pointer-events:none; }
+.home-dashboard__facts { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }.home-dashboard__facts span { display:grid; gap:4px; padding:10px 12px; border:1px solid var(--console-line); border-radius:14px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.home-dashboard__facts b { color:var(--console-muted); font-size:10px; }.home-dashboard__note { color:var(--console-muted); }
+/* ============ 房間頁 ============
+   舊版是一長串沒有分組的輸入欄，看不出「開房」跟「加入」是兩件事。
+   改成兩張卡片，各自有標題、說明與一個明確的主要動作。 */
+.room-setup,.room-live { display:grid; gap:14px; }
+.room-setup__lead { margin:0; color:var(--console-muted); font-size:13px; line-height:1.7; }
+.room-setup__lead b { color:var(--console-fg); }
+.room-card { display:block; padding:16px; border:1px solid var(--console-line); border-radius:18px; background:var(--console-panel); }
+.room-card > .card3d__lift { display:grid; gap:12px; }
+.room-card > .card3d__lift > header { display:flex; align-items:center; gap:11px; }
+.room-card > .card3d__lift > header b { display:block; font-size:14px; }
+.room-card > .card3d__lift > header small { display:block; margin-top:2px; color:var(--console-muted); font-size:12px; }
+.room-card__badge { flex:none; padding:5px 10px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:.04em;
+  color:#fff; background:#243e51; }
+.room-card--join .room-card__badge { background:#4a6fa5; }
+.room-card__badge.is-host { background:#b8762a; }
+.room-card__badge.is-member { background:#3f7d5c; }
+.room-card__body { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+/* 全域 .field 是「標籤在左、輸入框在右」的兩欄版型（120px 1fr）。
+   房間卡片一列要放兩個欄位，再左右分欄就會擠成一團，所以改成標籤在上。 */
+.room-card__body .field { display:grid; grid-template-columns:1fr; align-items:start; gap:5px; margin:0; }
+.room-card__body .field--wide { grid-column:1 / -1; }
+.room-card__body .field > span { color:var(--console-muted); font-size:12px; }
+.room-card__body .field input { height:34px; border-radius:9px; border:1px solid var(--console-line);
+  background:var(--console-surface); color:var(--console-fg); padding:0 10px; font-size:13px; width:100%; }
+.room-card__go { margin:0; height:40px; font-weight:800; }
+.room-address { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:10px 12px;
+  border:1px dashed var(--console-line); border-radius:12px; }
+.room-address > span { color:var(--console-muted); font-size:12px; }
+.room-address > b { flex:1; min-width:120px; font-size:13px; font-variant-numeric:tabular-nums; }
+.room-stats { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:9px; }
+.room-stats span { display:grid; gap:2px; padding:9px 11px; border:1px solid var(--console-line); border-radius:12px;
+  color:var(--console-muted); font-size:11px; text-align:center; }
+.room-stats b { color:var(--console-fg); font-size:16px; font-variant-numeric:tabular-nums; }
+/* 房間頁的下拉／輸入要放得下完整內容（位址 + 網卡名稱可以很長）。
+   全域 .row 的控制項欄固定 118px，在這裡會把字切掉，所以改成標籤在上、
+   控制項佔滿整列。 */
+.room-setup .row,
+.room-live .row { grid-template-columns:1fr; align-items:start; gap:5px; }
+.room-setup .row select,
+.room-live .row select,
+.room-setup .row input,
+.room-live .row input { width:100%; height:34px; font-size:13px; }
+.room-setup .row .row__val,
+.room-live .row .row__val { display:none; }
+@media (max-width: 720px) { .room-card__body { grid-template-columns:1fr; } }
+.console-settings > h2,.console-help > h2 { margin-top:0; }.console-settings > p { color:var(--console-muted); font-size:13px; }.console-help ol { color:var(--console-muted); line-height:2; }
+@media (max-width: 820px) { .console-shell__body { grid-template-columns:136px minmax(0,1fr); }.console-status-rail { display:none; }.console-shell__page { padding:20px; } }
+@media (max-width: 590px) { .cw--console { padding:6px; }.console-shell__body { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }.console-nav { grid-auto-flow:column; grid-template-columns:repeat(6,max-content); overflow:auto; border-right:0; border-bottom:1px solid var(--console-line); padding:8px; }.console-nav button { padding:7px 9px; }.console-nav small { display:none; }.home-dashboard__facts { grid-template-columns:1fr; } }
+/* 減少動態：介面本身的轉場一律停掉。
+   貓咪不在這裡一併凍住 —— 它是使用者自己要的桌寵，改由「桌寵動作」設定決定
+   （full / gentle / auto / off）。舊版把貓也列進來，系統一關動畫效果，
+   貓就完全不動，使用者也看不出原因。 */
+@media (prefers-reduced-motion: reduce) { .console-nav button { animation:none !important; transition:none !important; } }
+/* 溫和：原地做動作，但不跨畫面移動 */
+.home-cat-stage--gentle .home-cat { transition:none; }
+/* 關閉：完全靜止，停在目前動作的第一格 */
+.home-cat-stage--off .home-cat,
+.home-cat-stage--off .home-cat__sprite,
+.home-cat-stage--off .home-cat__sleep { animation:none !important; transition:none !important; }
+.home-cat-stage--off .home-cat__sprite { background-position-x:0; }
+
+/* ============ 立體卡片與觸感按鈕 ============
+   目標是「摸得到」的介面：卡片會跟著游標傾斜、有跟著轉的高光與邊緣光，
+   按鈕像實體按鍵一樣有厚度、按下去會陷進去，並從實際點到的位置擴散漣漪。
+   全部只用 transform / opacity，跑在合成層，不會觸發 layout。
+
+   由 .console-shell[data-motion] 統一控管：
+     full   完整（預設）
+     subtle 只留按壓回饋與淡高光，不傾斜
+     off    完全靜態
+   刻意不掛在 prefers-reduced-motion 上 —— 這是使用者主動要的效果，
+   系統把動畫效果關掉不代表他不想要（桌寵當初就是這樣被整個凍住的）。 */
+
+/* 注意：這裡刻意「不用」transform-style: preserve-3d。
+   preserve-3d 會把子元素推進 3D 空間，而按鈕本身也有 transform
+   （hover 的位移、按下的下沉）。兩者相遇時 Chromium 的命中測試會算錯，
+   點擊直接穿過按鈕打到父層 —— 症狀就是「按鈕按不動」，而且因為 hover
+   才會觸發位移，正好在使用者要按下去的那一刻失效。
+   卡片只靠自己的 perspective + rotate 就有立體感，不需要子層的 Z 位移。 */
+.card3d {
+  position: relative;
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform .5s cubic-bezier(.2, .8, .2, 1), box-shadow .5s ease;
+  will-change: transform;
+}
+/* 游標在上面時要跟手，所以縮短過渡；離開才慢慢彈回 */
+.card3d.is-tilting {
+  transition: transform .07s linear, box-shadow .2s ease;
+  box-shadow:
+    calc((0.5 - var(--px, .5)) * 24px) calc(18px + (0.5 - var(--py, .5)) * -10px) 34px rgba(16, 26, 46, .18),
+    0 2px 6px rgba(16, 26, 46, .10);
+}
+/* 跟著游標跑的反光 */
+.card3d::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(340px circle at calc(var(--px, .5) * 100%) calc(var(--py, .5) * 100%),
+    rgba(255, 255, 255, .58), rgba(255, 255, 255, 0) 58%);
+  opacity: 0;
+  transition: opacity .35s ease;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+}
+.card3d.is-tilting::before { opacity: 1; }
+/* 邊緣的一圈光，起點跟著游標角度轉 */
+.card3d::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from calc(var(--px, .5) * 360deg),
+    transparent 0%, var(--console-accent) 12%, transparent 34%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity .35s ease;
+  pointer-events: none;
+}
+.card3d.is-tilting::after { opacity: .9; }
+/* 內容層。以前這裡用 translateZ 做視差，但那需要父層 preserve-3d，
+   而 preserve-3d 會讓裡面的按鈕點不到（見上面的說明）。
+   視差不值得用「按鈕失效」去換，所以只保留版面用途。 */
+.card3d__lift { position: relative; }
+
+/* 觸感按鈕：底下那道 lip 就是按鍵的厚度。
+   這裡不加 translateZ(0)（原本是拿來提示 GPU 圖層用的）——
+   按鈕本來就會在 hover/active 動 transform，圖層自然會建立，
+   而多這一層 Z 位移只會讓命中測試更容易出錯。 */
+.btn, .mini-action, .console-nav button {
+  position: relative;
+  overflow: hidden;
+}
+.btn {
+  --lip: rgba(14, 22, 40, .20);
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1), box-shadow .16s ease, background .2s ease;
+  box-shadow: 0 2px 0 var(--lip), 0 6px 14px rgba(16, 26, 46, .13);
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 0 var(--lip), 0 12px 22px rgba(16, 26, 46, .17); }
+.btn:active { transform: translateY(2px); box-shadow: 0 0 0 var(--lip), 0 2px 6px rgba(16, 26, 46, .16); }
+.btn:focus-visible { outline: 2px solid var(--console-accent); outline-offset: 2px; }
+/* hover 時掃過一道反光 */
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 32%, rgba(255, 255, 255, .45) 48%, transparent 64%);
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+.btn:hover::before { transform: translateX(130%); transition: transform .6s cubic-bezier(.2, .8, .2, 1); }
+.btn.danger { --lip: rgba(120, 20, 20, .28); }
+
+.mini-action {
+  transition: transform .14s cubic-bezier(.2, .8, .2, 1), background .2s ease, box-shadow .14s ease;
+  box-shadow: 0 1px 0 rgba(14, 22, 40, .16);
+}
+.mini-action:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(16, 26, 46, .16); }
+.mini-action:active { transform: translateY(1px); box-shadow: none; }
+
+/* 點擊漣漪：從實際點到的那一點擴散 */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 68%);
+  animation: ripple .58s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+@keyframes ripple { from { transform: scale(0); opacity: .8; } to { transform: scale(1); opacity: 0; } }
+
+/* 導覽列：選中的項目微微浮起來，左邊帶一條主色光條 */
+.console-nav button { transition: background .2s, color .2s, transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s; }
+.console-nav button.active { transform: translateX(3px); }
+.console-nav button.active::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 18%; bottom: 18%;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--console-accent);
+  box-shadow: 0 0 10px var(--console-accent);
+}
+
+/* 收斂模式：不傾斜、不轉邊光，但保留按壓與淡淡的反光 */
+.console-shell[data-motion="subtle"] .card3d { transform: none; }
+.console-shell[data-motion="subtle"] .card3d::after { opacity: 0 !important; }
+.console-shell[data-motion="subtle"] .card3d__lift { transform: none; }
+/* 全關：完全靜態 */
+.console-shell[data-motion="off"] .card3d,
+.console-shell[data-motion="off"] .card3d__lift { transform: none; }
+.console-shell[data-motion="off"] .card3d::before,
+.console-shell[data-motion="off"] .card3d::after { opacity: 0 !important; }
+.console-shell[data-motion="off"] .btn,
+.console-shell[data-motion="off"] .mini-action { transition: background .2s ease; }
+.console-shell[data-motion="off"] .btn:hover,
+.console-shell[data-motion="off"] .btn:active,
+.console-shell[data-motion="off"] .mini-action:hover,
+.console-shell[data-motion="off"] .mini-action:active { transform: none; }
+.console-shell[data-motion="off"] .btn::before { display: none; }
+.console-shell[data-motion="off"] .ripple { display: none; }
+
+/* 固定三欄控制台的內容規則：舊卡片式工作檯不再參與這個殼層。 */
+.console-shell[data-console-theme="dark"] .console-nav button.active,
+.console-shell[data-console-theme="system"] .console-nav button.active { color:var(--console-fg); background:color-mix(in srgb, var(--console-accent) 18%, var(--console-panel)); border-color:color-mix(in srgb, var(--console-accent) 42%, var(--console-line)); }
+.console-shell .console-status-rail section { background:var(--console-surface); border-color:var(--console-line); }
+.console-shell .home-dashboard__actions { display:grid; gap:7px; min-width:124px; }
+.console-shell .home-dashboard__tutorial { border:1px solid var(--console-line); border-radius:13px; padding:8px 11px; background:var(--console-panel); color:var(--console-fg); font:inherit; font-size:12px; }
+.console-shell .console-look-preview { display:grid; min-height:260px; gap:10px; padding:12px; border:1px solid var(--console-line); border-radius:20px; background:var(--console-panel); place-items:center; overflow:hidden; }
+.console-shell .console-look-preview > span { justify-self:start; color:var(--console-muted); font-size:12px; font-weight:700; }
+
+/* 預覽舞台：桌面藥丸實際是疊在桌布上的，字幕預設是白字。
+   若預覽底色跟控制台一樣淺，白字幾乎看不見，就沒辦法靠預覽判斷外觀。
+   這裡鋪一塊中性深色的「假桌布」，再加細棋盤格顯示玻璃的透明度。 */
+.console-shell .home-dashboard__preview,
+.console-shell .console-look-preview {
+  --stage-grid: rgba(255, 255, 255, 0.045);
+  background:
+    conic-gradient(from 90deg at 50% 50%,
+      var(--stage-grid) 0 25%, transparent 0 50%,
+      var(--stage-grid) 0 75%, transparent 0) 0 0 / 18px 18px,
+    linear-gradient(150deg, #26344a 0%, #181f2e 55%, #2e243c 100%);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.console-shell .console-look-preview > span { color: rgba(255, 255, 255, 0.62); }
+.console-shell .sect__head { border:1px solid var(--console-line); background:var(--console-surface); color:var(--console-fg); box-shadow:none; }
+.console-shell .sect__head:hover { background:color-mix(in srgb, var(--console-accent) 7%, var(--console-surface)); }
+.console-shell .sect__body,
+.console-shell .nowplaying,
+.console-shell .account,
+.console-shell .update-notes { border-color:var(--console-line); background:color-mix(in srgb, var(--console-surface) 88%, var(--console-panel)); color:var(--console-fg); }
+.console-shell .group,
+.console-shell .row__label,
+.console-shell .tgl__label,
+.console-shell .meta,
+.console-shell .kv,
+.console-shell .field span,
+.console-shell .playlist-target span { color:var(--console-fg); }
+.console-shell .hint,
+.console-shell .sub,
+.console-shell .tgl__hint,
+.console-shell .row__val,
+.console-shell .time,
+.console-shell .tip { color:var(--console-muted); }
+.console-shell .row select,
+.console-shell .row input[type="color"],
+.console-shell .searchbar input,
+.console-shell .playlist-select,
+.console-shell .playlist-target select,
+.console-shell .field input { border-color:var(--console-line); background:var(--console-surface); color:var(--console-fg); }
+.console-shell .btn,
+.console-shell .mini-action { border-color:var(--console-line); background:var(--console-panel); color:var(--console-fg); }
+.console-shell .btn:hover,
+.console-shell .mini-action:hover { background:color-mix(in srgb, var(--console-accent) 8%, var(--console-panel)); }
+.console-shell .tgl { border-color:var(--console-line); background:var(--console-surface); }
+.console-shell .results li { border-color:var(--console-line); background:var(--console-surface); }
+.console-onboarding { position:absolute; inset:0; z-index:10; display:grid; place-items:center; padding:28px; background:rgba(248,251,255,.94); }
+.console-shell[data-console-theme="dark"] .console-onboarding { background:rgba(23,33,43,.95); }
+.console-onboarding__card { width:min(420px,100%); padding:28px; border:1px solid var(--console-line); border-radius:22px; background:var(--console-panel); box-shadow:0 18px 44px rgba(32,68,91,.2); animation:consoleDialogIn .24s cubic-bezier(.2,.9,.2,1) both; }
+.console-onboarding__card > span { color:var(--console-accent); font-size:12px; font-weight:800; }
+.console-onboarding h2 { margin:7px 0 8px; font-size:24px; }
+.console-onboarding p { margin:0; color:var(--console-muted); line-height:1.7; }
+.console-onboarding__actions { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+.console-onboarding__skip { border:0; background:transparent; color:var(--console-muted); font:inherit; }
+.console-onboarding__next { font:inherit; font-weight:800; }
+@keyframes consoleDialogIn { from { opacity:0; transform:translateY(10px) scale(.98); } to { opacity:1; transform:none; } }
+@media (max-width: 860px) {
+  .console-shell__body { grid-template-columns:132px minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; grid-template-areas:"nav main" "nav panel"; }
+  .console-panel { max-height:240px; border-top:1px solid var(--console-line); border-left:0; }
+  .console-main,.console-shell__page { padding:20px; }
+}
+@media (max-width: 590px) {
+  .console-shell__body { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr) auto; grid-template-areas:"nav" "main" "panel"; }
+  .console-nav { grid-auto-flow:column; grid-template-columns:repeat(6,max-content); overflow:auto; border-right:0; border-bottom:1px solid var(--console-line); padding:8px; }
+  .console-nav button { padding:7px 9px; }
+  .console-nav small { display:none; }
+  .home-dashboard__facts { grid-template-columns:1fr; }
+  .home-dashboard__intro { align-items:flex-start; flex-direction:column; }
+  .console-shell .home-dashboard__actions { width:100%; grid-template-columns:1fr 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .console-onboarding__card { animation:none !important; }
+}
+
+/* top 必須讓開標題列 —— 放在 16px 時 toast 會蓋住右上角的關閉鈕，
+   只要有通知跳出來就關不掉視窗。 */
+.console-toast { position:absolute; z-index:30; top:72px; right:18px; display:flex; align-items:center; gap:12px; max-width:min(420px,calc(100% - 36px)); padding:10px 12px 10px 14px; border:1px solid var(--console-line); border-radius:14px; background:var(--console-panel); color:var(--console-fg); box-shadow:0 12px 28px rgba(32,68,91,.16); animation:consoleToastIn .18s ease-out both; }
+.console-toast--error { border-color:#e4a0a0; }.console-toast--warning { border-color:#e7c886; }.console-toast--info { border-color:var(--console-line); }
+.console-toast span { font-size:12px; line-height:1.45; }.console-toast button { flex:0 0 auto; width:24px; height:24px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--console-muted); font:inherit; font-size:18px; line-height:1; }
+.console-toast button:hover { background:color-mix(in srgb, var(--console-accent) 10%, var(--console-panel)); color:var(--console-fg); }
+@keyframes consoleToastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
+.console-dialog-layer { position:absolute; inset:0; z-index:24; display:grid; place-items:center; padding:28px; border-radius:inherit; background:color-mix(in srgb, var(--console-surface) 82%, transparent); }
+.console-dialog { width:min(420px,100%); padding:24px; border:1px solid var(--console-line); border-radius:20px; background:var(--console-panel); color:var(--console-fg); box-shadow:0 18px 44px rgba(32,68,91,.22); animation:consoleDialogIn .2s cubic-bezier(.2,.9,.2,1) both; }
+.console-dialog h2 { margin:0 0 8px; font-size:20px; }.console-dialog p { margin:0; color:var(--console-muted); font-size:13px; line-height:1.65; }
+.console-dialog__actions { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; }.console-dialog__cancel,.console-dialog__confirm { border:1px solid var(--console-line); border-radius:11px; padding:8px 12px; background:var(--console-surface); color:var(--console-fg); font:inherit; font-size:12px; }.console-dialog__confirm { border-color:var(--console-accent); background:var(--console-accent); color:#fff; }
+.console-close-dialog__remember { display:flex; align-items:center; gap:8px; margin-top:18px; color:var(--console-muted); font-size:12px; }.console-close-dialog__remember input { accent-color:var(--console-accent); }
+.console-close-dialog__actions { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:18px; }.console-close-dialog__actions button { min-height:42px; padding:8px; border:1px solid var(--console-line); border-radius:11px; background:var(--console-surface); color:var(--console-fg); font:inherit; font-size:12px; }.console-close-dialog__actions button:hover { background:color-mix(in srgb, var(--console-accent) 9%, var(--console-surface)); }.console-close-dialog__actions .danger { border-color:#d99191; color:#b24646; }
+.console-shell .playlist-rename { display:flex; gap:7px; margin-top:8px; }.console-shell .playlist-rename input { min-width:0; flex:1; border:1px solid var(--console-line); border-radius:10px; padding:7px 9px; background:var(--console-surface); color:var(--console-fg); font:inherit; font-size:12px; }
+@media (prefers-reduced-motion: reduce) { .console-toast,.console-dialog { animation:none !important; } }
+@media (max-width: 590px) { .console-close-dialog__actions { grid-template-columns:1fr; } .console-dialog-layer { padding:16px; } }

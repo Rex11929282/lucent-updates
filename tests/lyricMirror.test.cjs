@@ -15,12 +15,13 @@ test('effective lyric alpha includes the row and text opacity, not only color al
   assert.equal(effectiveLyricAlpha(0.8, 1, 1), 0.8)
 })
 
-test('CDP lyric polling is fast, lightweight, and never accumulates overlapping evaluations', () => {
+test('CDP uses direct lyric events with a bounded low-frequency fallback poll', () => {
   const source = fs.readFileSync(require.resolve('../electron/ncmcdp.cjs'), 'utf8')
-  assert.match(source, /const POLL_INTERVAL_MS = 32/)
+  assert.match(source, /const POLL_INTERVAL_MS = 120/)
   assert.match(source, /if \(pollInFlight\) return/)
   assert.match(source, /pollInFlight = true/)
   assert.match(source, /pollInFlight = false/)
+  assert.match(source, /performance\.getEntriesByType\('resource'\)/)
   assert.match(source, /window\.__lglLyricSnapshot/)
   assert.match(source, /window\.__lglLyricReadAt/)
 })
@@ -54,12 +55,13 @@ test('the precise-sync indicator requires a real direct lyric event, not only a 
   assert.match(consoleSource, /info\?\.cdp && info\?\.lyricMirror/)
 })
 
-test('startup never force-restarts NetEase and the optional debug restart requires consent', () => {
+test('Lucent keeps precise-mode reconnection manual instead of opening NetEase at startup', () => {
   const main = fs.readFileSync(path.resolve(__dirname, '../electron/main.cjs'), 'utf8')
   const consoleSource = fs.readFileSync(path.resolve(__dirname, '../src/ConsoleWindow.jsx'), 'utf8')
+  assert.match(main, /ncmcdp\.start\(onCdp\)/)
   assert.doesNotMatch(main, /ensurePreciseMode/)
   assert.match(main, /ipcMain\.handle\('ncm:relaunchDebug'/)
-  assert.match(consoleSource, /window\.confirm\(/)
+  assert.match(consoleSource, /onClick=\{enablePrecise\}/)
 })
 
 test('serialized lyric selector runs without Node module closures', () => {
@@ -186,6 +188,16 @@ test('time fallback follows playback position when current class is absent', () 
   const selected = selectLyricCandidate(rows, 14.1)
   assert.equal(selected.index, 5)
   assert.equal(selected.source, 'time')
+})
+
+test('a stale current lyric yields to the playback-time row after a large seek', () => {
+  const rows = [
+    { index: 0, main: 'old current', current: true, alpha: 1, alphaKnown: true, time: 12 },
+    { index: 1, main: 'seek target', alpha: 0.4, alphaKnown: true, time: 84 },
+  ]
+  assert.deepEqual(selectLyricCandidate(rows, 84), {
+    index: 1, main: 'seek target', sub: '', source: 'time',
+  })
 })
 
 test('alpha fallback prefers the last equally bright row during a transition', () => {

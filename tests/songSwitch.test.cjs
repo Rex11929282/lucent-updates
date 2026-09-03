@@ -5,12 +5,17 @@ const path = require('node:path')
 
 const {
   createSongRevision,
+  canTrustCdpSongIdentity,
   currentPlaybackSongId,
   isFreshMirrorSnapshot,
   mapNeteaseSongDetail,
   mirrorBelongsToSong,
+  mirrorSyncDisposition,
   normalizeCdpSnapshot,
+  playbackStateToPlaying,
+  resolveCdpPlaying,
   songIdentityKey,
+  shouldProcessMirrorSnapshot,
 } = require('../shared/songSwitch.cjs')
 
 test('only the newest song revision may commit delayed results', async () => {
@@ -43,6 +48,37 @@ test('main promotes a provisional song when a live CDP id arrives', () => {
   assert.match(source, /promoteCurrentSong\(nextId, 'cdp'\)/)
 })
 
+test('CDP identity is retained only for a fresh NetEase source', () => {
+  const identity = { source: 'cdp', id: '108242' }
+  assert.equal(canTrustCdpSongIdentity({
+    identity,
+    isNeteaseSource: true,
+    cdpConnected: true,
+    cdpFresh: true,
+  }), true)
+  assert.equal(canTrustCdpSongIdentity({
+    identity,
+    isNeteaseSource: false,
+    cdpConnected: true,
+    cdpFresh: true,
+  }), false)
+  assert.equal(canTrustCdpSongIdentity({
+    identity,
+    isNeteaseSource: true,
+    cdpConnected: false,
+    cdpFresh: true,
+  }), false)
+  assert.equal(canTrustCdpSongIdentity({
+    identity: { source: 'smtc', id: '108242' },
+    isNeteaseSource: true,
+    cdpConnected: true,
+    cdpFresh: true,
+  }), false)
+
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
+  assert.match(main, /canTrustCdpSongIdentity\(/)
+})
+
 test('live playback event id wins over a stale lyric request id', () => {
   assert.equal(currentPlaybackSongId({
     progressSongId: '108242',
@@ -55,6 +91,30 @@ test('live playback event id wins over a stale lyric request id', () => {
     requestSongId: '19723756',
   }), '145879')
   assert.equal(currentPlaybackSongId({ requestSongId: '19723756' }), '19723756')
+})
+
+test('an explicit NetEase pause state wins over a recently moving progress slider', () => {
+  assert.equal(playbackStateToPlaying('109998|pause|F84MC7'), false)
+  assert.equal(playbackStateToPlaying('109998|resume|F84MC7'), true)
+  assert.equal(playbackStateToPlaying('109998|unknown|F84MC7'), null)
+
+  assert.equal(resolveCdpPlaying({
+    playState: '109998|pause|F84MC7',
+    lastProgressAt: 9_900,
+    now: 10_000,
+  }), false)
+})
+
+test('a playback-only CDP event never clears the verified lyric mirror', () => {
+  assert.equal(shouldProcessMirrorSnapshot({
+    stateSongId: '1345571065',
+    playState: '1345571065|pause|2EKM0L',
+  }), false)
+  assert.equal(shouldProcessMirrorSnapshot({ lyric: null }), true)
+  assert.equal(shouldProcessMirrorSnapshot({ lyric: { songId: '1345571065', main: '目前歌詞' } }), true)
+
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
+  assert.match(main, /if \(shouldProcessMirrorSnapshot\(d\)\) \{[\s\S]*?mirrorSyncDisposition/)
 })
 
 test('the newest playback event wins when progress and state disagree during switching', () => {
@@ -80,6 +140,16 @@ test('a mirrored lyric is accepted only for the active song id', () => {
   assert.equal(mirrorBelongsToSong('108242', '19723756'), false)
   assert.equal(mirrorBelongsToSong('108242', null), false)
   assert.equal(mirrorBelongsToSong(null, '108242'), false)
+})
+
+test('a lyric snapshot without a verified song id clears the previous mirror instead of reusing it', () => {
+  assert.equal(typeof mirrorSyncDisposition, 'function')
+  assert.equal(mirrorSyncDisposition({ activeSongId: '108242', lyric: { songId: null, main: '新畫面句子' } }), 'waiting-identity')
+  assert.equal(mirrorSyncDisposition({ activeSongId: '108242', lyric: { songId: '19723756', main: '舊歌殘留' } }), 'waiting-identity')
+  assert.equal(mirrorSyncDisposition({ activeSongId: '108242', lyric: { songId: '108242', main: '目前歌曲' } }), 'exact')
+
+  const mainSource = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
+  assert.match(mainSource, /mirrorSyncDisposition\(/)
 })
 
 test('an older poll snapshot cannot replace a newer direct lyric event', () => {
@@ -146,4 +216,21 @@ test('main makes a new song ready before optional YRC enrichment completes', () 
   const readyAt = source.indexOf('loading: false,')
   const yrcAt = source.indexOf('ncmcdp.fetchYrc(id)')
   assert.ok(readyAt >= 0 && yrcAt >= 0 && readyAt < yrcAt)
+})
+
+test('CDP publishes the immediate playback slider and main uses it before delayed rate detection', () => {
+  const root = path.join(__dirname, '..')
+  const cdp = fs.readFileSync(path.join(root, 'electron', 'ncmcdp.cjs'), 'utf8')
+  const main = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  assert.match(cdp, /progressSec/)
+  assert.match(cdp, /__lglSelectProgress/)
+  assert.match(main, /const directProgress = Number\(d\.progressSec\)/)
+})
+
+test('the CDP PlayState callback is forwarded immediately and used by the main clock', () => {
+  const root = path.join(__dirname, '..')
+  const cdp = fs.readFileSync(path.join(root, 'electron', 'ncmcdp.cjs'), 'utf8')
+  const main = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  assert.match(cdp, /appendRegisterCall\('PlayState'[\s\S]*window\.lglReport[\s\S]*stateSongId/)
+  assert.match(main, /resolveCdpPlaying\(\{[\s\S]*playState:\s*d\.playState/)
 })

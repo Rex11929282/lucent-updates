@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  # Monthly, grouped. A solo-maintained project does not benefit from a pull
+  # request per patch bump — that is noise that gets ignored, which is worse
+  # than no automation at all. Security advisories still arrive immediately
+  # through Dependabot alerts regardless of this schedule.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine dev-tooling bumps.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      # One PR for routine runtime bumps.
+      production-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Electron majors change Chromium and Node together and routinely break
+      # window behaviour, the media-session bridge and packaging. Those upgrades
+      # are done deliberately with a manual smoke test, not merged from a bot PR.
+      - dependency-name: electron
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3

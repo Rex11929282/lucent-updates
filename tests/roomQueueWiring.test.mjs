@@ -33,15 +33,23 @@ test('queue and permissions cross only the room IPC bridge without sensitive pla
 })
 
 test('Traditional Chinese UI exposes requests, host grants and queue controls', () => {
-  assert.match(ui, /待播放歌曲/)
-  assert.match(ui, /管理佇列/)
-  assert.match(ui, /控制播放/)
-  assert.match(ui, /點歌已送交房主/)
-  assert.match(ui, /目前跟隨房主/)
+  assert.match(ui, /t\('ui\.room\.queueGroup'/)
+  assert.match(ui, /t\('ui\.room\.capQueue'/)
+  assert.match(ui, /t\('ui\.room\.capPlayback'/)
+  assert.match(ui, /t\('ui\.playlist\.request'/)
+  assert.match(ui, /t\('ui\.room\.followHost'/)
 })
 
 test('internal player end advances the host queue and members route controls as commands', () => {
-  assert.match(main, /eventType === 'ended'[^\n]*advanceRoomQueue/)
+  const onEnded = main.match(/if \(eventType === 'ended'\) \{[\s\S]*?\n  \}/)[0]
+  // The room queue still wins when hosting; only if it has nothing left does the
+  // internal player fall back to its own queue.
+  assert.match(onEnded, /advanceRoomQueue\(\)/)
+  assert.match(onEnded, /stepInternalQueue\(1\)/)
+  assert.ok(
+    onEnded.indexOf('advanceRoomQueue') < onEnded.indexOf('stepInternalQueue'),
+    'the room queue must be consulted before the local queue',
+  )
   assert.match(ui, /ov\.room\.command\('song\.request'/)
   assert.match(ui, /ov\.room\.command\('playback\.load'/)
 })

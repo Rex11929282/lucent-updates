@@ -6,8 +6,38 @@ const sub = (channel) => (cb) => {
   return () => ipcRenderer.removeListener(channel, h)
 }
 
+// Main passes the Windows display-language preference here, because the
+// renderer's navigator.language reports the region format instead — on a
+// machine set to Traditional Chinese with a zh-CN region format, trusting
+// navigator.language shows the whole UI in Simplified Chinese.
+const systemLocaleArgument = process.argv.find((arg) => arg.startsWith('--lucent-system-locale='))
+const systemLocale = systemLocaleArgument ? systemLocaleArgument.split('=').slice(1).join('=') : ''
+
+let captureSequence = 0
+function capturePill(crop) {
+  const requestId = `pill-capture-${++captureSequence}`
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (dataUrl) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      ipcRenderer.removeListener('overlay:capturePill:result', onResult)
+      resolve(dataUrl || null)
+    }
+    const onResult = (_event, result) => {
+      if (result?.requestId !== requestId) return
+      finish(result.dataUrl)
+    }
+    const timer = setTimeout(() => finish(null), 900)
+    ipcRenderer.on('overlay:capturePill:result', onResult)
+    ipcRenderer.send('overlay:capturePill:start', { requestId, crop })
+  })
+}
+
 contextBridge.exposeInMainWorld('overlay', {
   isElectron: true,
+  systemLocale,
 
   // 設定狀態
   stateGet: () => ipcRenderer.invoke('state:get'),
@@ -17,12 +47,20 @@ contextBridge.exposeInMainWorld('overlay', {
   // 主視窗（藥丸）
   setSize: (w, h, mx, my) => ipcRenderer.invoke('overlay:setSize', w, h, mx, my),
   getBounds: () => ipcRenderer.invoke('overlay:getBounds'),
-  capturePill: (crop) => ipcRenderer.invoke('overlay:capturePill', crop),
+  capturePill,
   setPosition: (x, y) => ipcRenderer.invoke('overlay:setPosition', x, y),
   setIgnoreMouse: (ignore) => ipcRenderer.invoke('overlay:setIgnoreMouse', ignore),
   popupMenu: () => ipcRenderer.invoke('menu:popup'),
   openConsole: () => ipcRenderer.invoke('console:open'),
   closeConsole: () => ipcRenderer.invoke('console:close'),
+  onConsoleVisibility: sub('overlay:console-visibility'),
+  console: {
+    requestClose: () => ipcRenderer.invoke('console:close'),
+    closeWith: (action, remember = false) => ipcRenderer.invoke('console:close-with', { action, remember }),
+    showPill: () => ipcRenderer.invoke('console:show-pill'),
+    hideToTray: () => ipcRenderer.invoke('console:hide-to-tray'),
+    onCloseRequested: sub('console:close-request'),
+  },
   quit: () => ipcRenderer.invoke('app:quit'),
   onTogglePlay: sub('cmd:toggle-play'),
   onDesktopFrame: sub('desktop:frame'),
@@ -31,16 +69,20 @@ contextBridge.exposeInMainWorld('overlay', {
   ncmRelaunchDebug: () => ipcRenderer.invoke('ncm:relaunchDebug'),
 
   player: {
-    load: (trackId) => ipcRenderer.invoke('player:load', trackId),
+    load: (trackId, context) => ipcRenderer.invoke('player:load', trackId, context),
+    next: () => ipcRenderer.invoke('player:next'),
+    previous: () => ipcRenderer.invoke('player:previous'),
     play: () => ipcRenderer.invoke('player:play'),
     pause: () => ipcRenderer.invoke('player:pause'),
     toggle: () => ipcRenderer.invoke('player:toggle'),
     seek: (positionMs) => ipcRenderer.invoke('player:seek', positionMs),
+    setVolume: (value) => ipcRenderer.invoke('player:volume', value),
     qaLoad: (url) => ipcRenderer.invoke('player:qaLoad', url),
     qaCommand: (type, extra) => ipcRenderer.invoke('player:qaCommand', type, extra),
     snapshot: () => ipcRenderer.invoke('player:snapshot'),
     onChanged: sub('player:changed'),
     onTick: sub('player:tick'),
+    onSpectrum: sub('player:spectrum'),
     onCommand: sub('player:command'),
     report: (event) => ipcRenderer.send('player:event', event),
   },
@@ -70,6 +112,7 @@ contextBridge.exposeInMainWorld('overlay', {
     qaTick: (t) => ipcRenderer.invoke('room:qaTick', t),
     snapshot: () => ipcRenderer.invoke('room:snapshot'),
     lanIp: () => ipcRenderer.invoke('room:lanip'),
+    lanIps: () => ipcRenderer.invoke('room:lanips'),
     offerStyle: (targetId, name) => ipcRenderer.invoke('room:offerStyle', { targetId, name }),
     respondStyleOffer: (requestId, accepted) => ipcRenderer.invoke('room:respondStyleOffer', { requestId, accepted }),
     pendingOffers: () => ipcRenderer.invoke('room:pendingOffers'),

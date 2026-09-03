@@ -26,7 +26,13 @@ function createMusicProvider({
   allowUnofficial = false,
   loadUnofficial = () => require('./netease.cjs'),
 } = {}) {
-  if (!isPackaged || allowUnofficial) return loadUnofficial()
+  if (!isPackaged || allowUnofficial) {
+    try {
+      return loadUnofficial()
+    } catch (error) {
+      return unavailableProvider(error)
+    }
+  }
   return unavailableProvider()
 }
 

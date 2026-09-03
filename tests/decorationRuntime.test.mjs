@@ -143,21 +143,21 @@ test('React wiring keeps fresh config in refs and groups background opacity once
 
 test('Task 4 console exposes only four Chinese modes through mode-aware controls', () => {
   const consoleSource = readSource('../src/ConsoleWindow.jsx')
-  const sectionStart = consoleSource.indexOf('<Section title="✨ 裝飾特效"')
-  const sectionEnd = consoleSource.indexOf('<Section title="✨ 歌詞與藥丸動畫"', sectionStart)
+  const sectionStart = consoleSource.indexOf("ui.look.effects.title")
+  const sectionEnd = consoleSource.indexOf("ui.look.animation.title", sectionStart)
   const sectionSource = consoleSource.slice(sectionStart, sectionEnd)
 
-  for (const [value, label] of [
-    ['none', '無'],
-    ['meteor', '流星雨'],
-    ['sakura', '櫻花飄落'],
-    ['snow', '雪花飄落'],
+  for (const [value, key] of [
+    ['none', 'ui.look.effects.modeNone'],
+    ['meteor', 'ui.look.effects.modeMeteor'],
+    ['sakura', 'ui.look.effects.modeSakura'],
+    ['snow', 'ui.look.effects.modeSnow'],
   ]) {
-    assert.match(sectionSource, new RegExp(`<option value="${value}">${label}</option>`))
+    assert.ok(sectionSource.includes(`<option value="${value}">{t('${key}')}</option>`), key)
   }
 
   assert.match(consoleSource, /const decorationControls = decorationControlsForMode\(cfg\.decorationMode\)/)
-  assert.match(sectionSource, /<Section title="✨ 裝飾特效" \{\.\.\.sectionProps\('effects'\)\}>/)
+  assert.match(consoleSource, /sectionProps\('effects'\)/)
   assert.match(sectionSource, /\{decorationControls\.count && <>/)
   assert.match(sectionSource, /\{decorationControls\.spawnRate && <>/)
   assert.match(sectionSource, /\{decorationControls\.sway && <>/)
@@ -169,30 +169,25 @@ test('Task 4 reset and preview toggle stay local to decoration UI', () => {
 
   assert.match(consoleSource, /setCfg\(resetDecorationConfig\(\)\)/)
   assert.match(consoleSource, /const \[previewDecoration, setPreviewDecoration\] = useState\(true\)/)
-  assert.match(consoleSource, /label="播放裝飾預覽"/)
+  assert.match(consoleSource, /label=\{t\('look\.preview\.play'\)\}/)
   assert.doesNotMatch(consoleSource, /onChange=\{\(previewDecoration\).*setCfg/)
 })
 
-test('preview stacks the shared renderer above its background and below its content', () => {
+test('appearance preview reuses the shared Capsule renderer without a simplified layer', () => {
   const consoleSource = readSource('../src/ConsoleWindow.jsx')
   const cssSource = readSource('../src/styles.css')
   const previewStart = consoleSource.indexOf('<div className="preview"')
-  const previewEnd = consoleSource.indexOf('<Toggle label="播放裝飾預覽"', previewStart)
+  const previewEnd = consoleSource.indexOf("<Toggle label={t('look.preview.play')}", previewStart)
   const previewSource = consoleSource.slice(previewStart, previewEnd)
 
-  assertOrdered(previewSource, [
-    '<div className="preview__effect-layer">',
-    '<DecorationCanvas',
-    'previewActive={previewDecoration}',
-    '</div>',
-    '<div className="preview__content">',
-    '<LiquidGlass',
-  ])
-  assert.match(readCssRule(cssSource, '.preview'), /overflow:\s*hidden/)
+  assert.match(previewSource, /<ConsoleCapsulePreview state=\{state\}/)
+  assert.doesNotMatch(previewSource, /<DecorationCanvas/)
+  assert.doesNotMatch(previewSource, /<LiquidGlass/)
+  assert.match(readCssRule(cssSource, '.preview'), /min-height:\s*128px/)
+  assert.match(readCssRule(cssSource, '.preview'), /overflow:\s*visible/)
   assert.match(readCssRule(cssSource, '.preview'), /isolation:\s*isolate/)
-  assert.match(readCssRule(cssSource, '.preview__effect-layer'), /z-index:\s*0/)
-  assert.match(readCssRule(cssSource, '.preview__effect-layer'), /border-radius:\s*inherit/)
-  assert.match(readCssRule(cssSource, '.preview__content'), /z-index:\s*1/)
+  assert.doesNotMatch(cssSource, /\.preview__effect-layer/)
+  assert.doesNotMatch(cssSource, /\.preview__content/)
 })
 
 test('meteor spawn rate changes fill speed on the same fake RAF timeline and stays capped', { skip: !runtimeExists }, () => {

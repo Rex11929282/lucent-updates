@@ -1,5 +1,5 @@
 export const PROGRESS_MODES = [
-  'none', 'flow', 'breathe', 'pulse', 'bounce', 'segments',
+  'none', 'flow', 'breathe', 'pulse', 'bounce', 'segments', 'spectrum',
 ]
 
 export const DECORATION_MODES = ['none', 'meteor', 'sakura', 'snow']
@@ -138,6 +138,58 @@ export const DEFAULT_LOOK_SECTIONS = Object.freeze({
   advanced: false,
 })
 
+// 排版預設只決定歌詞的呈現比例與對齊；歌詞來源、同步與歌名位置仍由既有設定負責。
+export const LYRIC_LAYOUTS = Object.freeze({
+  balanced: Object.freeze({ label: '動態島平衡', align: 'center', mainScale: 1, transScale: 1, gapScale: 1, progressGapScale: 1, nameScale: 1, translationVisible: true }),
+  concert: Object.freeze({ label: '演唱會置中', align: 'center', mainScale: 1.12, transScale: 0.9, gapScale: 1.15, progressGapScale: 1.05, nameScale: 0.95, translationVisible: true }),
+  bilingual: Object.freeze({ label: '雙語對照', align: 'left', mainScale: 0.98, transScale: 1.08, gapScale: 1.1, progressGapScale: 1, nameScale: 0.95, translationVisible: true }),
+  compact: Object.freeze({ label: '極簡單行', align: 'center', mainScale: 0.96, transScale: 0.9, gapScale: 0.55, progressGapScale: 0.7, nameScale: 0.9, translationVisible: false }),
+  album: Object.freeze({ label: '專輯資訊型', align: 'left', mainScale: 0.96, transScale: 0.98, gapScale: 0.85, progressGapScale: 0.9, nameScale: 1.08, translationVisible: true }),
+})
+
+export const LYRIC_FONT_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'system', label: '系統預設' }),
+  Object.freeze({ id: 'modern', label: '現代介面' }),
+  Object.freeze({ id: 'serif', label: '明體襯線' }),
+  Object.freeze({ id: 'mono', label: '等寬字體' }),
+])
+
+export const TEXT_STYLE_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'clean', label: '冷白清晰' }),
+  Object.freeze({ id: 'slant', label: '現代斜切' }),
+  Object.freeze({ id: 'soft', label: '柔光' }),
+  Object.freeze({ id: 'neon', label: '霓虹' }),
+  Object.freeze({ id: 'metal', label: '金屬' }),
+])
+
+export function normalizeTextStyle(value) {
+  return TEXT_STYLE_OPTIONS.some((style) => style.id === value) ? value : 'clean'
+}
+
+export function normalizeFlowFillColorMode(value) {
+  return value === 'cover-gradient' ? 'cover-gradient' : 'fixed'
+}
+
+const LYRIC_FONT_STACKS = Object.freeze({
+  system: 'system-ui, "Microsoft JhengHei UI", "Microsoft JhengHei", sans-serif',
+  modern: '"Segoe UI Variable", "Segoe UI", "Microsoft JhengHei UI", sans-serif',
+  serif: '"Noto Serif TC", "PMingLiU", serif',
+  mono: '"Cascadia Mono", "Microsoft JhengHei UI", monospace',
+})
+
+const LYRIC_ALIGN_ITEMS = Object.freeze({ left: 'flex-start', center: 'center', right: 'flex-end' })
+
+export function lyricLayoutValues(layout, alignOverride = 'auto') {
+  const id = Object.prototype.hasOwnProperty.call(LYRIC_LAYOUTS, layout) ? layout : 'balanced'
+  const preset = LYRIC_LAYOUTS[id]
+  const align = Object.prototype.hasOwnProperty.call(LYRIC_ALIGN_ITEMS, alignOverride) ? alignOverride : preset.align
+  return { id, ...preset, align, items: LYRIC_ALIGN_ITEMS[align], textAlign: align }
+}
+
+export function lyricFontStack(id) {
+  return LYRIC_FONT_STACKS[id] || LYRIC_FONT_STACKS.system
+}
+
 const NON_VISUAL_CFG = new Set([
   'alwaysOnTop', 'clickThrough', 'locked', 'safeMargin', 'snapMode',
   'offset', 'borderRGB', 'secondsPerLine',
@@ -197,4 +249,12 @@ export function progressSegmentStates(count, ratio) {
   const total = Math.max(2, Math.min(40, Math.round(Number(count) || 0)))
   const played = Math.round(Math.max(0, Math.min(1, Number(ratio) || 0)) * total)
   return Array.from({ length: total }, (_, index) => index < played)
+}
+
+// 海浪只讀播放器的真實進度比例；沒有進度時維持在底部，絕不自行假裝前進。
+export function oceanWaveLevel(progress) {
+  const raw = progress && typeof progress === 'object' ? progress.ratio : progress
+  const value = Number(raw)
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(1, Math.round(value * 1000) / 1000))
 }

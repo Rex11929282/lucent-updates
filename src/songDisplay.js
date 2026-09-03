@@ -76,12 +76,20 @@ export function flowFillRatioForTimedLine(lines, line, position) {
   const index = lines.indexOf(line)
   const nextTime = index >= 0 ? lines[index + 1]?.time : null
   if (!Number.isFinite(nextTime) || nextTime <= line.time) return null
-  return Math.max(0, Math.min(1, (position - line.time) / (nextTime - line.time)))
+  // LRC has no word end timestamps. Reserve the final part of a line interval
+  // for accompaniment instead of pretending every second until the next row is sung.
+  const activeDuration = (nextTime - line.time) * 0.82
+  return Math.max(0, Math.min(1, (position - line.time) / activeDuration))
+}
+
+export function activeFlowFillRatio({ lines = [], line, position } = {}) {
+  return flowFillRatioForLine(line, position)
+    ?? flowFillRatioForTimedLine(lines, line, position)
 }
 
 export function applyKaraokeClasses(element, ratio, text) {
   if (!element) return 0
-  const current = Math.round(
+  const current = Math.floor(
     Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0)) * Array.from(text || '').length,
   )
   const children = element.children || []
@@ -89,6 +97,22 @@ export function applyKaraokeClasses(element, ratio, text) {
     children[index].classList.toggle('sung', index < current)
   }
   return current
+}
+
+export function holdFlowFillRatio(previous, next) {
+  if (!Number.isFinite(next)) return Math.max(0, Math.min(1, Number(previous) || 0))
+  return Math.max(0, Math.min(1, next))
+}
+
+export function applyFlowFillStyles(element, ratio, text) {
+  if (!element) return 0
+  const total = Math.max(1, Array.from(text || '').length)
+  const exact = Math.max(0, Math.min(1, Number(ratio) || 0)) * total
+  Array.from(element.children || []).forEach((child, index) => {
+    const fill = Math.max(0, Math.min(1, exact - index))
+    child.style.setProperty('--flow-fill', `${(fill * 100).toFixed(2)}%`)
+  })
+  return exact
 }
 
 export function karaokeRatioForTimedLine(lines, line, position) {
@@ -108,25 +132,60 @@ export function mirrorKaraokeRatio({ lines = [], mirrorText, position, fallbackR
     ?? fallbackRatio
 }
 
-function flowLineAtMirrorIndex(lines, mirrorIndex, position) {
+function flowLineAtMirrorIndex(lines, mirrorText, mirrorIndex) {
   const index = Number(mirrorIndex)
   const line = Number.isInteger(index) && index >= 0 ? lines[index] : null
-  if (!line) return null
-  if (!line.words?.length) return line
-  if (!Number.isFinite(position)) return line
-  const starts = line.words.map((word) => word?.t).filter(Number.isFinite)
-  const ends = line.words.map((word) => word?.t + word?.d).filter(Number.isFinite)
-  if (!starts.length || !ends.length) return null
-  const start = Math.min(...starts)
-  const end = Math.max(...ends)
-  return position >= start - 0.35 && position <= end + 0.75 ? line : null
+  return line && normalizeLyricText(line.text) === normalizeLyricText(mirrorText) ? line : null
+}
+
+function flowLineAtPosition(lines, position) {
+  if (!Number.isFinite(position)) return null
+  let latest = null
+  for (const line of lines) {
+    const words = (line?.words || []).filter((word) => Number.isFinite(word?.t) && Number.isFinite(word?.d))
+    if (words.length) {
+      const start = Math.min(...words.map((word) => word.t))
+      const end = Math.max(...words.map((word) => word.t + word.d))
+      if (position >= start - 0.35 && position <= end + 0.75) return line
+      if (start <= position) latest = line
+      continue
+    }
+    if (Number.isFinite(line?.time) && line.time <= position) latest = line
+  }
+  return latest
 }
 
 export function mirrorFlowFillRatio({ lines = [], mirrorText, mirrorIndex, position } = {}) {
   const line = findTimelineLineForMirror(lines, mirrorText, position)
-    || flowLineAtMirrorIndex(lines, mirrorIndex, position)
-  return flowFillRatioForLine(line, position)
-    ?? flowFillRatioForTimedLine(lines, line, position)
+    || flowLineAtMirrorIndex(lines, mirrorText, mirrorIndex)
+    || flowLineAtPosition(lines, position)
+  return activeFlowFillRatio({ lines, line, position })
+}
+
+// The highlighted NetEase row is the source of truth for line changes. YRC timing
+// controls only the colour fill; it must never delay a verified row transition.
+export function flowDisplayMirror({ previous, incoming, lines = [], position } = {}) {
+  if (!incoming?.text || !previous?.text) return incoming || previous || null
+  if (previous.i === incoming.i && previous.text === incoming.text) return incoming
+  return incoming
+}
+
+export function displayFlowFillRatio(ratio) {
+  return Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : null
+}
+
+export function shouldRunLineEffects({ playing = false, effectsPaused = false, preview = false } = {}) {
+  return !!playing && !effectsPaused && !preview
+}
+
+export function shouldCommitDisplayMirror(current, next) {
+  const before = current?.mirror || null
+  const after = next?.mirror || null
+  return current?.songKey !== next?.songKey
+    || String(before?.songId ?? '') !== String(after?.songId ?? '')
+    || (before?.i ?? null) !== (after?.i ?? null)
+    || String(before?.text ?? '') !== String(after?.text ?? '')
+    || String(before?.trans ?? '') !== String(after?.trans ?? '')
 }
 
 export function lyricLineIdentity({ songKey = 'none', useMirror = false, mirror, curIdx = -1 } = {}) {
@@ -183,7 +242,8 @@ export function mirrorMatchesSong(mirror, song) {
   return String(mirror.songId) === String(song.id)
 }
 
-export function currentSongLyric({ song, mirror, lines = [], curIdx = 0 } = {}) {
+export function currentSongLyric({ song, mirror, lines = [], curIdx = 0, syncStatus } = {}) {
+  if (syncStatus === 'waiting-identity' || syncStatus === 'no-precise-data') return '♪'
   if (mirrorMatchesSong(mirror, song)) return mirror.text
   if (song?.loading) return '♪'
   const timedLine = curIdx >= 0 ? lines[curIdx]?.text : ''

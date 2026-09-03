@@ -4,7 +4,32 @@ export function initialSongTransition() {
 
 export function particleTransitionDuration(phase, speed = 1) {
   const safeSpeed = Math.max(0.5, Math.min(2, Number(speed) || 1))
-  return (phase === 'shatter-out' ? 900 : 850) / safeSpeed
+  return (phase === 'shatter-out' ? 1000 : 1200) / safeSpeed
+}
+
+export function particleMotion(amount, rebuilding, rebuildDelay = 0, holding = false) {
+  const progress = Math.max(0, Math.min(1, Number(amount) || 0))
+  if (holding) {
+    return { travel: 1, opacity: 0.18, radiusScale: 0.72 }
+  }
+  if (rebuilding) {
+    const delay = Math.max(0, Math.min(0.55, Number(rebuildDelay) || 0))
+    if (progress < delay) return { travel: 1, opacity: 0, radiusScale: 0.72 }
+    const local = Math.max(0, Math.min(1, (progress - delay) / Math.max(0.001, 1 - delay)))
+    const eased = local * local * (3 - 2 * local)
+    const fade = local <= 0.72 ? 1 : 1 - (local - 0.72) / 0.28
+    return {
+      travel: 1 - eased,
+      opacity: local === 0 ? 0.08 : Math.max(0, Math.min(1, (0.1 + local * 0.78) * fade)),
+      radiusScale: 0.72 + (1 - local) * 0.22,
+    }
+  }
+  const eased = Math.pow(progress, 1.35)
+  return {
+    travel: eased,
+    opacity: 0.9 - eased * 0.85,
+    radiusScale: 1 - eased * 0.28,
+  }
 }
 
 function seededRandom(seed) {
@@ -21,7 +46,7 @@ function seededRandom(seed) {
 export function createShatterParticles({ width, height, seed, count = 16 }) {
   const safeWidth = Math.max(1, Number(width) || 1)
   const safeHeight = Math.max(1, Number(height) || 1)
-  const total = Math.max(8, Math.min(72, Math.round(Number(count) || 16)))
+  const total = Math.max(16, Math.min(128, Math.round(Number(count) || 16)))
   const columns = Math.ceil(Math.sqrt(total * safeWidth / safeHeight))
   const rows = Math.ceil(total / columns)
   const cellWidth = safeWidth / columns
@@ -32,15 +57,14 @@ export function createShatterParticles({ width, height, seed, count = 16 }) {
   for (let index = 0; index < total; index += 1) {
     const column = index % columns
     const row = Math.floor(index / columns)
-    const x = column * cellWidth
-    const y = row * cellHeight
-    const w = Math.min(cellWidth, safeWidth - x)
-    const h = Math.min(cellHeight, safeHeight - y)
+    const w = Math.max(2, cellWidth * (0.48 + random() * 0.38))
+    const h = Math.max(2, cellHeight * (0.48 + random() * 0.38))
+    const x = Math.min(safeWidth - w, Math.max(0, column * cellWidth + random() * Math.max(0, cellWidth - w)))
+    const y = Math.min(safeHeight - h, Math.max(0, row * cellHeight + random() * Math.max(0, cellHeight - h)))
     const centerX = x + w / 2
     const centerY = y + h / 2
-    const angle = Math.atan2(centerY - safeHeight / 2, centerX - safeWidth / 2)
-      + (random() - 0.5) * 0.8
-    const distance = 16 + random() * 34
+    const angle = random() * Math.PI * 2
+    const distance = 12 + random() * 38
     const inset = 8 + random() * 18
     const shape = [
       [random() * inset, random() * inset],
@@ -57,6 +81,7 @@ export function createShatterParticles({ width, height, seed, count = 16 }) {
       dy: Math.sin(angle) * distance,
       rotation: (random() - 0.5) * 34,
       radius: Math.max(1.5, Math.min(w, h) * (0.18 + random() * 0.18)),
+      rebuildDelay: random() * 0.55,
       shape,
     })
   }
@@ -75,7 +100,7 @@ export function advanceSongTransition(state, event) {
   if (event.type === 'snapshot-ready' && state.phase === 'capture-out') return { ...state, phase: 'shatter-out' }
   if (event.type === 'snapshot-ready' && state.phase === 'capture-in') return { ...state, phase: 'shatter-in' }
   if (event.type === 'snapshot-failed' && (state.phase === 'capture-out' || state.phase === 'shatter-out')) {
-    return { ...state, phase: 'dormant' }
+    return { ...state, phase: 'idle' }
   }
   if (event.type === 'snapshot-failed' && (state.phase === 'capture-in' || state.phase === 'shatter-in')) {
     return { ...state, phase: 'idle' }
@@ -94,6 +119,11 @@ export function isTransitionEffectsPaused(phase) {
     || phase === 'dormant'
     || phase === 'capture-in'
     || phase === 'shatter-in'
+}
+
+export function shouldHidePillDuringTransition(mode, phase) {
+  return mode === 'shatter'
+    && (phase === 'shatter-out' || phase === 'dormant' || phase === 'shatter-in')
 }
 
 export function shatterSnapshotForPhase(phase, stableSnapshot, liveSnapshot) {

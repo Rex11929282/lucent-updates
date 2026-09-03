@@ -1,28 +1,51 @@
-const SOURCE = Object.freeze({
-  DESKTOP: 'desktop-netease',
-  INTERNAL: 'internal-player',
-  ROOM_HOST: 'room-host',
-  IDLE: 'idle',
-})
+const { SOURCE, isDesktopSource, isPlaybackSource } = require('./playbackSource.cjs')
+const { trackIdentityKey } = require('./trackIdentity.cjs')
+
+const EMPTY_LINES = Object.freeze([])
+const EMPTY_TRANSITION = Object.freeze({ token: 0, endedSongRevision: 0, endedSongId: null, readySongRevision: 0 })
 
 function playbackTrackKey(snapshot = {}) {
   const song = snapshot.song || {}
-  if (song.id != null && String(song.id)) return `id:${String(song.id)}`
-  const normalize = (value) => String(value || '')
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-  const name = normalize(song.name || song.title)
-  const artist = normalize(song.artist)
-  return name ? `meta:${name}|${artist}` : ''
+  return trackIdentityKey(song)
 }
 
-function normalizeSnapshot(source, snapshot, now) {
+function normalizePlaybackState(source, snapshot, now = Date.now()) {
   if (!snapshot || typeof snapshot !== 'object') return null
+  const rawSong = snapshot.song && typeof snapshot.song === 'object' ? snapshot.song : null
+  const durationMs = Math.max(0, Number(snapshot.durationMs ?? rawSong?.durationMs) || 0)
+  const playing = snapshot.playing === true
+  const originSource = source === SOURCE.ROOM_HOST
+    ? (snapshot.originSource || snapshot.source || SOURCE.ROOM_HOST)
+    : (snapshot.originSource || source)
   return {
     ...snapshot,
-    song: snapshot.song ? { ...snapshot.song } : null,
     source,
+    originSource,
+    sourceAppId: String(snapshot.sourceAppId || ''),
+    sessionId: String(snapshot.sessionId || ''),
+    song: rawSong ? {
+      ...rawSong,
+      name: String(rawSong.name || rawSong.title || ''),
+      title: String(rawSong.title || rawSong.name || ''),
+      artist: String(rawSong.artist || ''),
+      album: String(rawSong.album || ''),
+      cover: String(rawSong.cover || ''),
+      artistImageUrl: String(rawSong.artistImageUrl || rawSong.avatar || ''),
+      avatar: String(rawSong.avatar || ''),
+      durationMs,
+    } : null,
+    lines: Array.isArray(snapshot.lines) ? snapshot.lines : EMPTY_LINES,
+    timed: snapshot.timed === true,
+    positionMs: Math.max(0, Number(snapshot.positionMs) || 0),
+    durationMs,
+    playing,
+    paused: !playing,
+    playbackStatus: playing ? 'Playing' : 'Paused',
+    mirror: snapshot.mirror || null,
+    syncStatus: String(snapshot.syncStatus || (source === SOURCE.INTERNAL ? 'timeline' : 'idle')),
+    transition: snapshot.transition || EMPTY_TRANSITION,
+    loading: snapshot.loading === true || rawSong?.loading === true,
+    error: String(snapshot.error || ''),
     capturedAt: Number(snapshot.capturedAt) || now,
   }
 }
@@ -34,6 +57,7 @@ function songStateKey(song = {}) {
     song.artist ?? '',
     song.album ?? '',
     song.cover ?? '',
+    song.artistImageUrl ?? '',
     song.avatar ?? '',
     song.durationMs ?? 0,
     song.revision ?? 0,
@@ -62,7 +86,7 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
 
   function choose() {
     if (mode === 'member') return sources.get(SOURCE.ROOM_HOST) || null
-    const desktop = sources.get(SOURCE.DESKTOP)
+    const desktop = [...sources.entries()].find(([source]) => isDesktopSource(source))?.[1] || null
     const internal = sources.get(SOURCE.INTERNAL)
     if (desktop?.playing) return desktop
     if (internal?.playing) return internal
@@ -109,11 +133,16 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
       return publish()
     },
     update(source, snapshot) {
-      if (!Object.values(SOURCE).includes(source) || source === SOURCE.IDLE) {
+      if (!isPlaybackSource(source)) {
         throw new TypeError(`Unknown playback source: ${source}`)
       }
-      const normalized = normalizeSnapshot(source, snapshot, now())
-      if (normalized) sources.set(source, normalized)
+      const normalized = normalizePlaybackState(source, snapshot, now())
+      if (normalized) {
+        if (isDesktopSource(source)) {
+          for (const key of sources.keys()) if (isDesktopSource(key) && key !== source) sources.delete(key)
+        }
+        sources.set(source, normalized)
+      }
       else sources.delete(source)
       return publish()
     },
@@ -128,6 +157,8 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
           ? Math.max(0, Number(clock.positionMs))
           : Number(currentSource.positionMs || 0),
         playing: nextPlaying,
+        paused: !nextPlaying,
+        playbackStatus: nextPlaying ? 'Playing' : 'Paused',
         capturedAt: Number(clock.capturedAt) || now(),
       }
       sources.set(source, nextSource)
@@ -137,6 +168,8 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
           ...selected,
           positionMs: nextSource.positionMs,
           playing: nextSource.playing,
+          paused: nextSource.paused,
+          playbackStatus: nextSource.playbackStatus,
           capturedAt: nextSource.capturedAt,
         }
       }
@@ -144,6 +177,10 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
     },
     clear(source) {
       sources.delete(source)
+      return publish()
+    },
+    clearDesktop() {
+      for (const source of sources.keys()) if (isDesktopSource(source)) sources.delete(source)
       return publish()
     },
     current() {
@@ -156,4 +193,4 @@ function createPlaybackCoordinator({ now = Date.now } = {}) {
   }
 }
 
-module.exports = { SOURCE, createPlaybackCoordinator, playbackTrackKey }
+module.exports = { SOURCE, createPlaybackCoordinator, normalizePlaybackState, playbackTrackKey }

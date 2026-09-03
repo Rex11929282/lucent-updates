@@ -1,5 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 
 const { checkReleaseEnvironment } = require('../scripts/releasePreflight.cjs')
 const buildConfig = require('../electron-builder.config.cjs')
@@ -26,6 +28,8 @@ test('test builds embed the selected public GitHub update repository', () => {
   }])
   assert.equal(config.artifactName, undefined)
   assert.equal(config.nsis.artifactName, '${productName}-Setup-${version}.${ext}')
+  assert.equal(config.nsis.oneClick, false)
+  assert.equal(config.nsis.allowToChangeInstallationDirectory, true)
   assert.equal(config.portable, undefined)
 })
 
@@ -58,4 +62,32 @@ test('test release errors do not include environment values', () => {
 
 test('distribution build is explicitly local and never uploads release assets', () => {
   assert.match(pkg.scripts.dist, /--publish never/)
+})
+
+test('package manifest and lockfile keep the application version in sync', () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package-lock.json'), 'utf8'))
+  assert.equal(lock.version, pkg.version)
+  assert.equal(lock.packages?.['']?.version, pkg.version)
+})
+
+test('installer keeps one visible app exe while safely hiding required Electron support files', () => {
+  const config = createBuildConfig({})
+  const installerScript = path.join(__dirname, '..', 'build', 'installer.nsh')
+
+  assert.equal(config.compression, 'normal')
+  assert.ok(config.files.includes('!node_modules/NeteaseCloudMusicApi/public/**/*'))
+  assert.equal(config.nsis.include, 'build/installer.nsh')
+  assert.equal(fs.existsSync(installerScript), true)
+  const source = fs.readFileSync(installerScript, 'utf8')
+  assert.match(source, /!macro customInstall/)
+  assert.match(source, /attrib\.exe.*\+H.*\$INSTDIR\\\*/)
+  assert.match(source, /SetFileAttributes\s+"\$INSTDIR\\Lucent\.exe"\s+NORMAL/)
+})
+
+test('builder excludes non-runtime diagnostic and documentation artifacts without changing compression', () => {
+  const config = createBuildConfig({})
+  for (const pattern of ['!**/*.map', '!**/*.md', '!**/*.MD', '!**/*.markdown', '!**/test/**/*', '!**/tests/**/*']) {
+    assert.ok(config.files.includes(pattern), pattern)
+  }
+  assert.equal(config.compression, 'normal')
 })

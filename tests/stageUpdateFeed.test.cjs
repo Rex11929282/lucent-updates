@@ -30,6 +30,18 @@ test('staging copies only one NSIS installer, metadata, and its blockmap', () =>
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 
+test('staging accepts the configured hyphenated NSIS artifact name', () => {
+  const { root, releaseDir, outputDir } = fixture({
+    'latest.yml': 'version: 1.0.2',
+    'Lucent-Setup-1.0.2.exe': 'installer',
+    'Lucent-Setup-1.0.2.exe.blockmap': 'blockmap',
+  })
+  try {
+    const result = stageUpdateFeed({ releaseDir, outputDir })
+    assert.deepEqual(result.files.sort(), ['Lucent-Setup-1.0.2.exe', 'Lucent-Setup-1.0.2.exe.blockmap', 'latest.yml'])
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('staging rejects incomplete or ambiguous installers', () => {
   const missing = fixture({ 'latest.yml': 'version: 1.0.1' })
   const ambiguous = fixture({

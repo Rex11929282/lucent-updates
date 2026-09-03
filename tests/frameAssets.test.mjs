@@ -13,9 +13,21 @@ test('schema provides spacing and vinyl frame defaults', () => {
   assert.equal(schema.cfg.songNamePos, 'tl')
 })
 
+test('the none option is a bare cover, not the classic gold record', () => {
+  assert.equal(findVinylFrame('none').kind, 'bare')
+  assert.equal(findVinylFrame('classic').kind, 'classic')
+  assert.equal(schema.cfg.vinylFrame, 'none')
+})
+
+test('the retired avatar spectrum option safely falls back to the bare cover', () => {
+  assert.equal(VINYL_FRAMES.some((frame) => frame.id === 'spectrum'), false)
+  assert.equal(findVinylFrame('spectrum').id, 'none')
+  assert.equal(findVinylFrame('classic').kind, 'classic')
+})
+
 test('vinyl frame manifest keeps circular assets as contained images', () => {
   assert.equal(VINYL_FRAMES[0].id, 'none')
-  for (const frame of VINYL_FRAMES.slice(1)) {
+  for (const frame of VINYL_FRAMES.filter((frame) => frame.kind === 'frame')) {
     assert.match(frame.url, /^\.\/frames\/vinyl\/.+\.png$/)
     assert.equal(typeof frame.coverScale, 'number')
     assert.ok(frame.coverScale >= 0.4 && frame.coverScale <= 0.8)
@@ -25,7 +37,7 @@ test('vinyl frame manifest keeps circular assets as contained images', () => {
 
 test('vinyl artwork fills each measured frame opening without a dark gap', () => {
   assert.deepEqual(
-    Object.fromEntries(VINYL_FRAMES.slice(1).map((frame) => [frame.id, frame.coverScale])),
+    Object.fromEntries(VINYL_FRAMES.filter((frame) => frame.kind === 'frame').map((frame) => [frame.id, frame.coverScale])),
     { hologram: 0.75, wood: 0.74, celestial: 0.69 },
   )
 })
@@ -33,13 +45,14 @@ test('vinyl artwork fills each measured frame opening without a dark gap', () =>
 test('noise uses a stable standalone layer outside the blurred material', async () => {
   const capsule = await readFile(new URL('../src/components/Capsule.jsx', import.meta.url), 'utf8')
   const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  const noiseRule = css.match(/\.noise-layer\s*\{([\s\S]*?)\n\}/)?.[0] || ''
   assert.match(capsule, /className="noise-layer"/)
   assert.doesNotMatch(css, /\.has-noise\s+\.bglayer::after/)
   assert.doesNotMatch(css, /repeating-conic-gradient/)
-  assert.match(css, /\.noise-layer[\s\S]*?background-image:/)
-  assert.doesNotMatch(css, /\.noise-layer[\s\S]*?mix-blend-mode/)
+  assert.match(noiseRule, /background-image:/)
+  assert.doesNotMatch(noiseRule, /mix-blend-mode/)
   assert.doesNotMatch(css, /feTurbulence/)
-  assert.match(css, /\.noise-layer[\s\S]*?repeating-radial-gradient/)
+  assert.match(noiseRule, /repeating-radial-gradient/)
 })
 
 test('retired pill frames are absent from config, UI, and renderer', async () => {
@@ -63,10 +76,14 @@ test('selecting a vinyl frame replaces the default record surface instead of cov
   assert.doesNotMatch(css, /\.vinyl\.spin \.vinyl-frame/)
 })
 
-test('no vinyl frame preserves the default record branch', async () => {
+test('no vinyl frame renders only the bare cover branch', async () => {
   const capsule = await readFile(new URL('../src/components/Capsule.jsx', import.meta.url), 'utf8')
+  const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
   assert.equal(findVinylFrame('none').url, '')
-  assert.match(capsule, /const hasCustomVinylFrame = !!vinylFrame\.url/)
-  assert.match(capsule, /hasCustomVinylFrame \? 'vinyl--framed' : ''/)
-  assert.match(capsule, /\{hasCustomVinylFrame \? \(/)
+  assert.match(capsule, /const hasCustomVinylFrame = vinylFrame\.kind === 'frame'/)
+  assert.match(capsule, /const isBareVinyl = vinylFrame\.kind === 'bare'/)
+  assert.match(capsule, /vinyl--bare/)
+  assert.match(capsule, /vinyl__art--bare/)
+  assert.match(css, /\.vinyl--bare \.vinyl__ring,\s*\.vinyl--bare \.vinyl__disc,\s*\.vinyl--bare \.vinyl__art--default\s*\{\s*display:\s*none/)
+  assert.match(css, /\.vinyl__art--bare[\s\S]*?width:\s*100%/)
 })

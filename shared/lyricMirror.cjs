@@ -25,6 +25,12 @@ function selectLyricCandidate(candidates = [], positionSec) {
     source,
   })
   const rows = candidates.filter((row) => String(row && (row.main || row.text) || '').trim())
+  const timed = Number.isFinite(positionSec)
+    ? rows.filter((row) => Number.isFinite(row.time) && row.time <= positionSec + 0.35)
+    : []
+  const timeCandidate = timed.length
+    ? timed.reduce((selected, row) => row.time > selected.time ? row : selected)
+    : null
   const hasVisualAlphaSignal = rows.some((row) => row.alphaKnown !== false)
   const bright = hasVisualAlphaSignal ? rows.filter((row) => Number(row.alpha) >= 0.9) : []
   const visual = bright.reduce((selected, row) => {
@@ -41,17 +47,15 @@ function selectLyricCandidate(candidates = [], positionSec) {
       && Number(visual.alpha) >= Number(current.alpha) + 0.12) {
       return normalize(visual, 'alpha')
     }
+    if (current && timeCandidate && current.index !== timeCandidate.index
+      && Number.isFinite(current.time) && Math.abs(current.time - positionSec) > 1.25) {
+      return normalize(timeCandidate, 'time')
+    }
     return normalize(current, 'current')
   }
   if (visual) return normalize(visual, 'alpha')
 
-  if (Number.isFinite(positionSec)) {
-    const timed = rows.filter((row) => Number.isFinite(row.time) && row.time <= positionSec + 0.35)
-    if (timed.length) {
-      const latest = timed.reduce((selected, row) => row.time > selected.time ? row : selected)
-      return normalize(latest, 'time')
-    }
-  }
+  if (timeCandidate) return normalize(timeCandidate, 'time')
   return null
 }
 

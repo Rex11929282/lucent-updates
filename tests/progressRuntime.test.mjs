@@ -68,7 +68,7 @@ test('RGB 上色不會覆蓋使用者設定的進度條高度', () => {
 test('播放狀態變更會觸發 React 重繪 live class', () => {
   assert.match(roomHookSource, /const \[playing, setPlaying\] = useState/)
   assert.match(appSource, /playing: roomPlaying/)
-  assert.match(appSource, /playing: hasRoomSong \? roomPlaying : localPlaying/)
+  assert.match(appSource, /playing: !standby && hasRoomSong \? roomPlaying : false/)
   assert.match(appSource, /playing=\{transitionVisual\.playing\}/)
 })
 
@@ -77,10 +77,11 @@ test('主行程取得單一實例鎖並處理第二次啟動', () => {
   assert.match(mainSource, /app\.on\(['"]second-instance['"]/)
 })
 
-test('live progress uses discrete compositor transforms instead of a permanent CSS animation', () => {
+test('live progress shares the visual requestAnimationFrame compositor without a polling timer', () => {
   assert.match(capsuleSource, /fillRef\.current\.style\.transform\s*=\s*`scaleX\(\$\{p\.toFixed\(4\)\}\)`/)
   assert.doesNotMatch(capsuleSource, /fillRef\.current\.style\.width\s*=/)
-  assert.match(capsuleSource, /\},\s*100\)/)
+  assert.match(capsuleSource, /paintProgress\(\)[\s\S]*?requestAnimationFrame\(paint\)/)
+  assert.doesNotMatch(capsuleSource, /setInterval\(/)
   assert.match(css, /\.progress__fill\s*\{[^}]*width:\s*100%[^}]*transform-origin:\s*left center/s)
   assert.doesNotMatch(css, /\.progress__fill\s*\{[^}]*transition:/s)
 })

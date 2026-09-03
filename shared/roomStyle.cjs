@@ -8,6 +8,7 @@ const PERSONAL_WINDOW_CFG = new Set([
   'offset',
   'borderRGB',
   'secondsPerLine',
+  'internalPlayerVolume',
 ])
 
 function sharedAppearanceStyle(state = {}) {

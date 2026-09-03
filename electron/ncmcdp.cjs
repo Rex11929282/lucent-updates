@@ -4,10 +4,13 @@ const http = require('http')
 const WebSocket = require('ws')
 const { normalizeCdpSnapshot } = require('../shared/songSwitch.cjs')
 const { selectLyricCandidate, buildLyricSnapshot, effectiveLyricAlpha } = require('../shared/lyricMirror.cjs')
+const { selectProgressInput, selectPlaybackProgress } = require('../shared/progressInput.cjs')
 
 const SELECT_LYRIC_SOURCE = selectLyricCandidate.toString()
 const BUILD_SNAPSHOT_SOURCE = buildLyricSnapshot.toString()
 const EFFECTIVE_LYRIC_ALPHA_SOURCE = effectiveLyricAlpha.toString()
+const SELECT_PROGRESS_SOURCE = selectProgressInput.toString()
+const SELECT_PLAYBACK_SOURCE = selectPlaybackProgress.toString()
 
 let ws = null
 let connected = false
@@ -42,6 +45,116 @@ function getJson(port = PORT) {
   })
 }
 
+function buildHook() {
+  return `(()=>{try{
+    // 原生播放事件只是進度的加速來源；即使網易雲暫時拒絕註冊，也不能阻斷歌詞鏡像。
+    if(!window.__lglHookedV6){
+      try{
+        if(typeof legacyNativeCmder!=='undefined'&&legacyNativeCmder&&typeof legacyNativeCmder.appendRegisterCall==='function'){
+          legacyNativeCmder.appendRegisterCall('PlayProgress','audioplayer',(id,p)=>{
+            window.__lglProgressSongId=String(id||''); window.__lglProgressSongAt=Date.now();
+            window.__lglPos=p; window.__lglPosAt=Date.now();
+          });
+          legacyNativeCmder.appendRegisterCall('PlayState','audioplayer',(id,st)=>{
+            window.__lglStateSongId=String(id||''); window.__lglState=String(st); window.__lglStateAt=Date.now();
+            if(typeof window.lglReport==='function')window.lglReport(JSON.stringify({stateSongId:window.__lglStateSongId,playState:window.__lglState,stateAt:window.__lglStateAt}));
+          });
+        }
+      }catch(e){}
+      window.__lglHookedV6=true;
+    }
+    // 攔截網易雲自己的請求，取得「正在播的確切歌曲 ID」→ 歌詞永遠對得上
+    if(!window.__lglIdHook){window.__lglIdHook=true;
+      var grab=function(u){try{
+        var s=String(u||'');
+        if(/song\\/lyric|lyric\\/v1|song\\/detail/.test(s)){
+          var m=s.match(/[?&]id=(\\d+)/);
+          if(m && window.__lglSongId!==m[1]){
+            window.__lglSongId=m[1];
+            if(window.__lglSink) window.__lglSink(JSON.stringify({songId:m[1]}));
+          }
+        }
+      }catch(e){}};
+      var of=window.fetch;
+      window.fetch=function(u){ grab(typeof u==='string'?u:(u&&u.url)); return of.apply(this,arguments); };
+      var oo=XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open=function(m,u){ grab(u); return oo.apply(this,arguments); };
+    }
+    window.__lglScanKnownSongId=function(){try{
+      var entries=performance.getEntriesByType('resource');
+      for(var i=entries.length-1;i>=0;i--){
+        var u=String(entries[i].name||'');
+        if(!/song\\/lyric|lyric\\/v1|song\\/detail/.test(u))continue;
+        var m=u.match(/[?&]id=(\\d+)/);
+        if(m){window.__lglSongId=m[1];return m[1]}
+      }
+    }catch(e){}return null};
+    if(!window.__lglSongId)window.__lglScanKnownSongId();
+    window.__lglSelectLyric=${SELECT_LYRIC_SOURCE};
+    window.__lglBuildLyricSnapshot=${BUILD_SNAPSHOT_SOURCE};
+    window.__lglEffectiveLyricAlpha=${EFFECTIVE_LYRIC_ALPHA_SOURCE};
+    window.__lglSelectProgress=${SELECT_PROGRESS_SOURCE};
+    window.__lglSelectPlayback=${SELECT_PLAYBACK_SOURCE};
+    window.__lglReportLyric=function(snapshot){try{
+      if(snapshot&&typeof window.lglReport==='function')window.lglReport(JSON.stringify({requestSongId:window.__lglSongId||null,lyric:snapshot}));
+    }catch(e){}};
+    window.__lglReadLyric=function(){try{
+      var inputs=Array.from(document.querySelectorAll('input'));
+      var ranges=inputs.map(function(el){return {value:parseFloat(el.value),max:parseFloat(el.max)}});
+      var position=window.__lglSelectPlayback(ranges,Number(window.__lglPos),Date.now()-Number(window.__lglPosAt||0));
+      var rows=Array.from(document.querySelectorAll('.line')).map(function(el,index){
+        var parts=[];
+        el.querySelectorAll('div,p,span').forEach(function(n){
+          if(n.children.length) return;
+          var t=(n.textContent||'').trim();
+          if(t&&parts.indexOf(t)<0) parts.push(t);
+        });
+        if(!parts.length){var all=(el.textContent||'').trim();if(all)parts.push(all)}
+        var inner=el.querySelector('div,p,span')||el;
+        var rowStyle=getComputedStyle(el);
+        var innerStyle=getComputedStyle(inner);
+        var col=innerStyle.color||'';
+        var match=col.match(/rgba?\\(([^)]+)\\)/);
+        var colorAlpha=match?parseFloat((match[1].split(',')[3]||'1')):1;
+        var rowOpacity=parseFloat(rowStyle.opacity||'1');
+        var textOpacity=parseFloat(innerStyle.opacity||'1');
+        var alpha=window.__lglEffectiveLyricAlpha(colorAlpha,rowOpacity,textOpacity);
+        var alphaKnown=(Number.isFinite(colorAlpha)&&colorAlpha<.999)
+          ||(Number.isFinite(rowOpacity)&&rowOpacity<.999)
+          ||(Number.isFinite(textOpacity)&&textOpacity<.999);
+        var rawTime=el.getAttribute('data-time')||el.getAttribute('data-start-time')||el.getAttribute('data-start');
+        var time=parseFloat(rawTime);
+        if(Number.isFinite(time)&&time>10000)time/=1000;
+        var aria=String(el.getAttribute('aria-current')||'').toLowerCase();
+        return {index:index,main:parts[0]||'',sub:parts[1]||'',alpha:alpha,alphaKnown:alphaKnown,time:time,
+          current:el.classList.contains('current'),ariaCurrent:aria==='true'||aria==='page'||aria==='step'};
+      });
+      var selected=window.__lglSelectLyric(rows,position);
+      var readAt=Date.now();
+      if(selected){
+        var previous=window.__lglLyricSnapshot;
+        var snapshot=window.__lglBuildLyricSnapshot(previous,selected,readAt);
+        window.__lglLyricSnapshot=snapshot;
+        if(snapshot!==previous) window.__lglReportLyric(snapshot);
+      }
+      window.__lglLyricReadAt=readAt;
+      return window.__lglLyricSnapshot||null;
+    }catch(e){return window.__lglLyricSnapshot||null}};
+    window.__lglEnsureLyricObserver=function(){
+      var root=document.querySelector('.line')?.parentElement||document.body;
+      if(!root)return;
+      if(window.__lglLyricRoot===root&&window.__lglLyricObserver)return;
+      if(window.__lglLyricObserver)window.__lglLyricObserver.disconnect();
+      window.__lglLyricRoot=root;
+      window.__lglLyricObserver=new MutationObserver(function(){window.__lglReadLyric()});
+      window.__lglLyricObserver.observe(root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style','aria-current','data-time','data-start-time','data-start']});
+    };
+    window.__lglEnsureLyricObserver();
+    window.__lglReadLyric();
+    return 'ok'
+  }catch(e){return 'err:'+(e&&e.message)}})()`
+}
+
 async function connect(port = PORT) {
   clearTimeout(timer)
   timer = null
@@ -59,99 +172,7 @@ async function connect(port = PORT) {
       if (stopped || socket !== ws) { try { socket.close() } catch {}; return }
       send('Runtime.enable', {})
       send('Runtime.addBinding', { name: 'lglReport' })
-      const hook = `(()=>{try{
-        // 高亮列變更會用 CDP binding 即時推送；頁面變數與輪詢保留為連線重建時的備援。
-        if(!window.__lglHookedV3){window.__lglHookedV3=true;
-          legacyNativeCmder.appendRegisterCall('PlayProgress','audioplayer',(id,p)=>{
-            window.__lglProgressSongId=String(id||''); window.__lglProgressSongAt=Date.now();
-            window.__lglPos=p; window.__lglPosAt=Date.now();
-          });
-          legacyNativeCmder.appendRegisterCall('PlayState','audioplayer',(id,st)=>{
-            window.__lglStateSongId=String(id||''); window.__lglState=String(st); window.__lglStateAt=Date.now();
-          });
-        }
-        // 攔截網易雲自己的請求，取得「正在播的確切歌曲 ID」→ 歌詞永遠對得上
-        if(!window.__lglIdHook){window.__lglIdHook=true;
-          var grab=function(u){try{
-            var s=String(u||'');
-            if(/song\\/lyric|lyric\\/v1|song\\/detail/.test(s)){
-              var m=s.match(/[?&]id=(\\d+)/);
-              if(m && window.__lglSongId!==m[1]){
-                window.__lglSongId=m[1];
-                if(window.__lglSink) window.__lglSink(JSON.stringify({songId:m[1]}));
-              }
-            }
-          }catch(e){}};
-          var of=window.fetch;
-          window.fetch=function(u){ grab(typeof u==='string'?u:(u&&u.url)); return of.apply(this,arguments); };
-          var oo=XMLHttpRequest.prototype.open;
-          XMLHttpRequest.prototype.open=function(m,u){ grab(u); return oo.apply(this,arguments); };
-        }
-        window.__lglSelectLyric=${SELECT_LYRIC_SOURCE};
-        window.__lglBuildLyricSnapshot=${BUILD_SNAPSHOT_SOURCE};
-        window.__lglEffectiveLyricAlpha=${EFFECTIVE_LYRIC_ALPHA_SOURCE};
-        window.__lglReportLyric=function(snapshot){try{
-          if(snapshot&&typeof window.lglReport==='function')window.lglReport(JSON.stringify({requestSongId:window.__lglSongId||null,lyric:snapshot}));
-        }catch(e){}};
-        window.__lglReadLyric=function(){try{
-          var inputs=Array.from(document.querySelectorAll('input'));
-          var position=Number(window.__lglPos);
-          if(!Number.isFinite(position)){
-            var ranges=inputs.map(function(el){return {value:parseFloat(el.value),max:parseFloat(el.max)}})
-              .filter(function(v){return Number.isFinite(v.value)&&Number.isFinite(v.max)&&v.max>30&&v.value>=0&&v.value<=v.max+1});
-            if(ranges.length) position=ranges.sort(function(a,b){return b.max-a.max})[0].value;
-          }
-          var rows=Array.from(document.querySelectorAll('.line')).map(function(el,index){
-            var parts=[];
-            el.querySelectorAll('div,p,span').forEach(function(n){
-              if(n.children.length) return;
-              var t=(n.textContent||'').trim();
-              if(t&&parts.indexOf(t)<0) parts.push(t);
-            });
-            if(!parts.length){var all=(el.textContent||'').trim();if(all)parts.push(all)}
-            var inner=el.querySelector('div,p,span')||el;
-            var rowStyle=getComputedStyle(el);
-            var innerStyle=getComputedStyle(inner);
-            var col=innerStyle.color||'';
-            var match=col.match(/rgba?\\(([^)]+)\\)/);
-            var colorAlpha=match?parseFloat((match[1].split(',')[3]||'1')):1;
-            var rowOpacity=parseFloat(rowStyle.opacity||'1');
-            var textOpacity=parseFloat(innerStyle.opacity||'1');
-            var alpha=window.__lglEffectiveLyricAlpha(colorAlpha,rowOpacity,textOpacity);
-            var alphaKnown=(Number.isFinite(colorAlpha)&&colorAlpha<.999)
-              ||(Number.isFinite(rowOpacity)&&rowOpacity<.999)
-              ||(Number.isFinite(textOpacity)&&textOpacity<.999);
-            var rawTime=el.getAttribute('data-time')||el.getAttribute('data-start-time')||el.getAttribute('data-start');
-            var time=parseFloat(rawTime);
-            if(Number.isFinite(time)&&time>10000)time/=1000;
-            var aria=String(el.getAttribute('aria-current')||'').toLowerCase();
-            return {index:index,main:parts[0]||'',sub:parts[1]||'',alpha:alpha,alphaKnown:alphaKnown,time:time,
-              current:el.classList.contains('current'),ariaCurrent:aria==='true'||aria==='page'||aria==='step'};
-          });
-          var selected=window.__lglSelectLyric(rows,position);
-          var readAt=Date.now();
-          if(selected){
-            var previous=window.__lglLyricSnapshot;
-            var snapshot=window.__lglBuildLyricSnapshot(previous,selected,readAt);
-            window.__lglLyricSnapshot=snapshot;
-            if(snapshot!==previous) window.__lglReportLyric(snapshot);
-          }
-          window.__lglLyricReadAt=readAt;
-          return window.__lglLyricSnapshot||null;
-        }catch(e){return window.__lglLyricSnapshot||null}};
-        window.__lglEnsureLyricObserver=function(){
-          var root=document.querySelector('.line')?.parentElement||document.body;
-          if(!root)return;
-          if(window.__lglLyricRoot===root&&window.__lglLyricObserver)return;
-          if(window.__lglLyricObserver)window.__lglLyricObserver.disconnect();
-          window.__lglLyricRoot=root;
-          window.__lglLyricObserver=new MutationObserver(function(){window.__lglReadLyric()});
-          window.__lglLyricObserver.observe(root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','style','aria-current','data-time','data-start-time','data-start']});
-        };
-        window.__lglEnsureLyricObserver();
-        window.__lglReadLyric();
-        return 'ok'
-      }catch(e){return 'err:'+(e&&e.message)}})()`
+      const hook = buildHook()
       send('Runtime.evaluate', { expression: hook })
       connected = true
       startPolling()
@@ -201,7 +222,7 @@ async function connect(port = PORT) {
 
 // 輪詢頁面變數取得播放位置 / 歌曲 ID（比 CDP binding 可靠：不受連線重建影響）
 const POLL_ID = 987654
-const POLL_INTERVAL_MS = 32
+const POLL_INTERVAL_MS = 120
 let pollTimer = null
 let pollInFlight = false
 function startPolling() {
@@ -221,19 +242,29 @@ function startPolling() {
           // 同時取得：播放進度(input) + 歌曲ID + 「網易雲畫面上正在高亮的那一句」。
           // 高亮句是最可靠的來源：它由網易雲自己決定，完全不需要我們算時間軸。
           expression: `(()=>{try{
-            var vals=[];
+            var vals=[]; var ranges=[];
             document.querySelectorAll('input').forEach(function(el){
               var v=parseFloat(el.value);
               if(!isNaN(v)) vals.push(v);
+              ranges.push({value:v,max:parseFloat(el.max)});
             });
+            var progressSec=window.__lglSelectPlayback&&ranges.length
+              ?window.__lglSelectPlayback(ranges,Number(window.__lglPos),Date.now()-Number(window.__lglPosAt||0))
+              :null;
+            if(!window.__lglSongId&&window.__lglScanKnownSongId)window.__lglScanKnownSongId();
+            var lastProgress=Number(window.__lglLastPollProgress);
+            var seeked=Number.isFinite(progressSec)&&Number.isFinite(lastProgress)&&Math.abs(progressSec-lastProgress)>.8;
+            window.__lglLastPollProgress=progressSec;
+            if(Number.isFinite(progressSec))window.__lglPos=progressSec;
             var lyric=null;
             try{
               if(window.__lglEnsureLyricObserver)window.__lglEnsureLyricObserver();
               lyric=window.__lglLyricSnapshot||null;
-              if((!lyric||Date.now()-Number(window.__lglLyricReadAt||0)>180)&&window.__lglReadLyric)lyric=window.__lglReadLyric();
+              if((!lyric||seeked||Date.now()-Number(window.__lglLyricReadAt||0)>180)&&window.__lglReadLyric)lyric=window.__lglReadLyric();
             }catch(e){}
             return JSON.stringify({
               vals:vals,
+              progressSec:progressSec,
               progressSongId:window.__lglProgressSongId||null,
               progressAt:window.__lglProgressSongAt||0,
               stateSongId:window.__lglStateSongId||null,
@@ -312,4 +343,4 @@ function getStatus() {
   return { connected, directLyricEvents, lastDirectLyricAt }
 }
 
-module.exports = { start, stop, isConnected, getStatus, fetchYrc, parseBindingPayload, PORT }
+module.exports = { start, stop, isConnected, getStatus, fetchYrc, parseBindingPayload, buildHook, PORT }

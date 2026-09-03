@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 22,
   "glass": {
     "displacementScale": 0,
     "blurAmount": 0,
@@ -25,6 +25,7 @@
     "locked": false,
     "karaoke": true,
     "lyricHighlightMode": "characters",
+    "flowFillColorMode": "fixed",
     "skin": "glass",
     "showTime": true,
     "outline": 1,
@@ -46,6 +47,17 @@
     "barHeight": 5,
     "vinylRpm": 4.5,
     "fontWeight": 800,
+    "textStyle": "clean",
+    "lyricLayout": "balanced",
+    "lyricAlign": "auto",
+    "lyricFont": "system",
+    "translationFont": "inherit",
+    "lyricLetterSpacing": 0.01,
+    "translationLetterSpacing": 0,
+    "lyricLineHeight": 1.25,
+    "translationLineHeight": 1.3,
+    "translationScale": 0.72,
+    "translationWeight": 700,
     "glowColor": "#8ec8ff",
     "songNamePos": "tl",
     "lyricTranslationGap": 7,
@@ -67,10 +79,16 @@
     "safeMargin": 0,
     "snapMode": "normal",
     "showVinyl": true,
+    "internalPlayerVolume": 0.8,
 
     "bgPreset": "standard",
     "bgAlpha": 0.55,
     "bgBlur": 18,
+    "oceanWave": false,
+    "oceanWaveColor": "#45b9ff",
+    "oceanWaveOpacity": 0.32,
+    "oceanWaveAmplitude": 0.45,
+    "oceanWaveSpeed": 1,
     "bgBright": 1,
     "bgContrast": 1,
     "bgSat": 1.2,
@@ -93,6 +111,7 @@
 
     "barBeat": true,
     "barFillAlpha": 1,
+    "barFillColor": "#ffffff",
     "barTrackAlpha": 0.28,
     "progressAnim": "flow",
     "progressSpeed": 1,
@@ -105,10 +124,11 @@
     "segmentCount": 12,
     "segmentGap": 3,
     "segmentRadius": 3,
-    "songNameAlpha": 0.62,
+    "songNameAlpha": 0.86,
     "songNameColor": "#ffffff",
     "lyricAlpha": 1,
     "textClarity": 0.7,
+    "petMotion": "full",
     "decorationMode": "none",
     "decorationCount": 18,
     "decorationSpeed": 1,
@@ -149,6 +169,8 @@
     "channel": "stable"
   },
   "ui": {
+    "locale": "auto",
+    "lookHints": true,
     "lookSections": {
       "preview": true,
       "quick": true,
@@ -162,6 +184,26 @@
       "effects": false,
       "window": false,
       "advanced": false
+    },
+    "console": {
+      "selectedPage": "home",
+        "onboardingVersion": 0,
+        "theme": "system",
+        "motion": "full",
+        "startupView": "console",
+      "closeBehavior": "ask",
+      "launchAtLogin": false,
+      "appearanceSection": "quick"
+    },
+    "workbench": {
+      "activeModule": "",
+      "surface": "glass",
+      "modules": {
+        "play": { "x": -0.34, "y": -0.26 },
+        "look": { "x": 0.34, "y": -0.23 },
+        "room": { "x": -0.28, "y": 0.27 },
+        "system": { "x": 0.29, "y": 0.27 }
+      }
     }
   },
   "lyricsRaw": "",

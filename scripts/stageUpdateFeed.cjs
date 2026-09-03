@@ -6,7 +6,7 @@ function stageUpdateFeed({ releaseDir, outputDir }) {
   const target = path.resolve(String(outputDir || ''))
   const metadata = path.join(source, 'latest.yml')
   const installers = fs.existsSync(source)
-    ? fs.readdirSync(source).filter((name) => /Setup .*\.exe$/i.test(name))
+    ? fs.readdirSync(source).filter((name) => /(?:Setup[ .-]).*\.exe$/i.test(name))
     : []
   if (!fs.existsSync(metadata) || installers.length !== 1) throw new Error('更新產物不完整或不明確')
 

@@ -1,6 +1,22 @@
+const { trackIdentityKey } = require('./trackIdentity.cjs')
+
 function cleanSongId(value) {
   const match = String(value || '').match(/^(\d+)/)
   return match && match[1] !== '0' ? match[1] : null
+}
+
+function playbackStateToPlaying(value) {
+  const tokens = String(value || '').toLowerCase().split(/[^a-z]+/).filter(Boolean)
+  if (tokens.some((token) => ['pause', 'paused', 'stop', 'stopped'].includes(token))) return false
+  if (tokens.some((token) => ['play', 'playing', 'resume', 'resumed'].includes(token))) return true
+  return null
+}
+
+function resolveCdpPlaying({ playState, lastProgressAt = 0, now = Date.now(), progressGraceMs = 1500 } = {}) {
+  const explicit = playbackStateToPlaying(playState)
+  if (explicit !== null) return explicit
+  const last = Number(lastProgressAt)
+  return Number.isFinite(last) && last > 0 && Number(now) - last < progressGraceMs
 }
 
 function currentPlaybackSongId({
@@ -22,23 +38,33 @@ function normalizeCdpSnapshot(raw = {}) {
   return snapshot
 }
 
-function normalizeMeta(value) {
-  return String(value || '')
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
+function songIdentityKey(song = {}) {
+  return trackIdentityKey({ ...song, id: cleanSongId(song.id) })
 }
 
-function songIdentityKey(song = {}) {
-  const id = cleanSongId(song.id)
-  if (id) return `id:${id}`
-  return `meta:${normalizeMeta(song.name || song.title)}|${normalizeMeta(song.artist)}`
+function canTrustCdpSongIdentity({ identity, isNeteaseSource = false, cdpConnected = false, cdpFresh = false } = {}) {
+  return isNeteaseSource === true
+    && cdpConnected === true
+    && cdpFresh === true
+    && identity?.source === 'cdp'
+    && !!cleanSongId(identity.id)
 }
 
 function mirrorBelongsToSong(activeSongId, lyricSongId) {
   const active = cleanSongId(activeSongId)
   const lyric = cleanSongId(lyricSongId)
   return !!active && active === lyric
+}
+
+function mirrorSyncDisposition({ activeSongId, lyric } = {}) {
+  if (!activeSongId || !lyric?.songId) return 'waiting-identity'
+  if (!lyric.main) return 'no-precise-data'
+  if (!mirrorBelongsToSong(activeSongId, lyric.songId)) return 'waiting-identity'
+  return 'exact'
+}
+
+function shouldProcessMirrorSnapshot(snapshot = {}) {
+  return Object.hasOwn(snapshot, 'lyric')
 }
 
 function isFreshMirrorSnapshot(previous = {}, incoming = {}) {
@@ -111,6 +137,11 @@ module.exports = {
   isFreshMirrorSnapshot,
   mapNeteaseSongDetail,
   mirrorBelongsToSong,
+  mirrorSyncDisposition,
+  shouldProcessMirrorSnapshot,
   normalizeCdpSnapshot,
+  playbackStateToPlaying,
+  resolveCdpPlaying,
   songIdentityKey,
+  canTrustCdpSongIdentity,
 }

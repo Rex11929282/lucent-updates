@@ -168,12 +168,25 @@ test('legacy karaoke boolean migrates to a named lyric highlight mode', () => {
   assert.equal(invalid.cfg.lyricHighlightMode, 'characters')
 })
 
+test('legacy typography settings safely fall back to supported text and flow-fill modes', () => {
+  const legacy = migrateState({ schemaVersion: 20, cfg: {} }, schema)
+  const valid = migrateState({ schemaVersion: 20, cfg: { textStyle: 'slant', flowFillColorMode: 'cover-gradient' } }, schema)
+  const invalid = migrateState({ schemaVersion: 20, cfg: { textStyle: 'wrong', flowFillColorMode: 'wrong' } }, schema)
+
+  assert.equal(legacy.cfg.textStyle, 'clean')
+  assert.equal(legacy.cfg.flowFillColorMode, 'fixed')
+  assert.equal(valid.cfg.textStyle, 'slant')
+  assert.equal(valid.cfg.flowFillColorMode, 'cover-gradient')
+  assert.equal(invalid.cfg.textStyle, 'clean')
+  assert.equal(invalid.cfg.flowFillColorMode, 'fixed')
+})
+
 test('schema 10 adds and clamps the pill mouse activation distance', () => {
   const legacy = migrateState({ schemaVersion: 9, cfg: {} }, schema)
   const tooFar = migrateState({ schemaVersion: 9, cfg: { hoverActivationDistance: 999 } }, schema)
   const invalid = migrateState({ schemaVersion: 9, cfg: { hoverActivationDistance: 'bad' } }, schema)
 
-  assert.equal(schema.schemaVersion, 12)
+  assert.equal(schema.schemaVersion, 22)
   assert.equal(legacy.cfg.hoverActivationDistance, 14)
   assert.equal(tooFar.cfg.hoverActivationDistance, 80)
   assert.equal(invalid.cfg.hoverActivationDistance, 14)
@@ -191,7 +204,7 @@ test('schema 11 retires lyric offset and pill RGB border from current config and
     }],
   }, schema)
 
-  assert.equal(schema.schemaVersion, 12)
+  assert.equal(schema.schemaVersion, 22)
   assert.equal('offset' in result.cfg, false)
   assert.equal('borderRGB' in result.cfg, false)
   assert.equal(result.cfg.rgbBar, true)
@@ -209,4 +222,168 @@ test('schema 12 adds safe update defaults and normalizes unknown channels', () =
   assert.deepEqual(beta.updates, { autoCheck: false, channel: 'beta' })
   const invalid = migrateState({ schemaVersion: 12, updates: { channel: 'nightly' } }, schema)
   assert.equal(invalid.updates.channel, 'stable')
+})
+
+test('schema 13 adds bounded personal liquid workbench layout', () => {
+  const legacy = migrateState({ schemaVersion: 12, ui: { lookSections: { basic: false } } }, schema)
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal(legacy.ui.lookSections.basic, false)
+  assert.deepEqual(Object.keys(legacy.ui.workbench.modules), ['play', 'look', 'room', 'system'])
+
+  const malformed = migrateState({
+    schemaVersion: 12,
+    ui: { workbench: { activeModule: 'bad', modules: { play: { x: 999, y: -999 } } } },
+  }, schema)
+  assert.equal(malformed.ui.workbench.activeModule, '')
+  assert.deepEqual(malformed.ui.workbench.modules.play, { x: 0.42, y: -0.34 })
+})
+
+test('schema 14 preserves only recognised control workbench surfaces', () => {
+  const legacy = migrateState({ schemaVersion: 13, ui: { workbench: { surface: 'white' } } }, schema)
+  const invalid = migrateState({ schemaVersion: 13, ui: { workbench: { surface: 'night' } } }, schema)
+
+  assert.equal(legacy.ui.workbench.surface, 'white')
+  assert.equal(invalid.ui.workbench.surface, 'glass')
+})
+
+test('schema 15 adds a bounded personal internal-player volume', () => {
+  const legacy = migrateState({ schemaVersion: 14, cfg: {} }, schema)
+  const tooLoud = migrateState({ schemaVersion: 14, cfg: { internalPlayerVolume: 2 } }, schema)
+  const invalid = migrateState({ schemaVersion: 14, cfg: { internalPlayerVolume: 'bad' } }, schema)
+
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal(legacy.cfg.internalPlayerVolume, 0.8)
+  assert.equal(tooLoud.cfg.internalPlayerVolume, 1)
+  assert.equal(invalid.cfg.internalPlayerVolume, 0.8)
+})
+
+test('schema 20 promotes only the legacy dim song-title default', () => {
+  const migrated = migrateState({
+    schemaVersion: 19,
+    cfg: { songNameAlpha: 0.62 },
+    profiles: [{ id: 'old-default', name: '舊預設', glass: {}, cfg: { songNameAlpha: 0.62 } }],
+  }, schema)
+  const personal = migrateState({
+    schemaVersion: 19,
+    cfg: { songNameAlpha: 0.4 },
+    profiles: [{ id: 'personal', name: '個人設定', glass: {}, cfg: { songNameAlpha: 0.4 } }],
+  }, schema)
+
+  assert.equal(migrated.cfg.songNameAlpha, 0.86)
+  assert.equal(migrated.profiles[0].cfg.songNameAlpha, 0.86)
+  assert.equal(personal.cfg.songNameAlpha, 0.4)
+  assert.equal(personal.profiles[0].cfg.songNameAlpha, 0.4)
+})
+
+test('schema 19 removes the retired avatar spectrum ring while preserving progress spectrum', () => {
+  const legacy = migrateState({ schemaVersion: 15, cfg: {} }, schema)
+  const bounded = migrateState({
+    schemaVersion: 15,
+    cfg: { vinylFrame: 'spectrum', progressAnim: 'spectrum', spectrumSize: 9, spectrumAmplitude: -1 },
+  }, schema)
+
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal('spectrumSize' in legacy.cfg, false)
+  assert.equal('spectrumAmplitude' in legacy.cfg, false)
+  assert.equal(bounded.cfg.vinylFrame, 'none')
+  assert.equal(bounded.cfg.progressAnim, 'spectrum')
+  assert.equal('spectrumSize' in bounded.cfg, false)
+  assert.equal('spectrumAmplitude' in bounded.cfg, false)
+})
+
+test('schema 17 adds a bounded progress-driven ocean material without changing playback settings', () => {
+  const legacy = migrateState({ schemaVersion: 16, cfg: {} }, schema)
+  const bounded = migrateState({
+    schemaVersion: 16,
+    cfg: { oceanWave: 'yes', oceanWaveOpacity: 9, oceanWaveAmplitude: -1, oceanWaveSpeed: 99 },
+  }, schema)
+
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal(legacy.cfg.oceanWave, false)
+  assert.equal(legacy.cfg.oceanWaveOpacity, 0.32)
+  assert.equal(legacy.cfg.oceanWaveAmplitude, 0.45)
+  assert.equal(legacy.cfg.oceanWaveSpeed, 1)
+  assert.equal(bounded.cfg.oceanWave, false)
+  assert.equal(bounded.cfg.oceanWaveOpacity, 0.8)
+  assert.equal(bounded.cfg.oceanWaveAmplitude, 0)
+  assert.equal(bounded.cfg.oceanWaveSpeed, 3)
+})
+
+test('schema 18 normalizes lyric layout and typography without changing lyric data', () => {
+  const legacy = migrateState({ schemaVersion: 17, cfg: {} }, schema)
+  const bounded = migrateState({
+    schemaVersion: 17,
+    cfg: {
+      lyricLayout: 'not-a-layout',
+      lyricAlign: 'diagonal',
+      lyricFont: 'unknown',
+      translationFont: 'unknown',
+      lyricLetterSpacing: 2,
+      translationLetterSpacing: -2,
+      lyricLineHeight: 9,
+      translationLineHeight: 0,
+      translationScale: 9,
+      translationWeight: 1,
+    },
+  }, schema)
+
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal(legacy.cfg.lyricLayout, 'balanced')
+  assert.equal(legacy.cfg.lyricAlign, 'auto')
+  assert.equal(legacy.cfg.lyricFont, 'system')
+  assert.equal(legacy.cfg.translationFont, 'inherit')
+  assert.equal(bounded.cfg.lyricLayout, 'balanced')
+  assert.equal(bounded.cfg.lyricAlign, 'auto')
+  assert.equal(bounded.cfg.lyricFont, 'system')
+  assert.equal(bounded.cfg.translationFont, 'inherit')
+  assert.equal(bounded.cfg.lyricLetterSpacing, 0.16)
+  assert.equal(bounded.cfg.translationLetterSpacing, -0.08)
+  assert.equal(bounded.cfg.lyricLineHeight, 1.8)
+  assert.equal(bounded.cfg.translationLineHeight, 0.95)
+  assert.equal(bounded.cfg.translationScale, 1.25)
+  assert.equal(bounded.cfg.translationWeight, 400)
+})
+
+test('legacy desktop backdrop safely falls back without changing saved glass values', () => {
+  const result = migrateState({
+    cfg: { backdrop: 'desktop' },
+    glass: { elasticity: 0.75, blurAmount: 0.2 },
+  }, schema)
+
+  assert.equal(result.cfg.backdrop, schema.cfg.backdrop)
+  assert.equal(result.glass.elasticity, 0.75)
+  assert.equal(result.glass.blurAmount, 0.2)
+})
+
+test('schema 22 adds persisted console preferences and migrates legacy workbench focus', () => {
+  const legacy = migrateState({
+    schemaVersion: 21,
+    ui: { workbench: { activeModule: 'system' } },
+  }, schema)
+  const saved = migrateState({
+    schemaVersion: 22,
+    ui: {
+      console: {
+        selectedPage: 'room',
+        onboardingVersion: 1,
+        theme: 'dark',
+        startupView: 'pill',
+        closeBehavior: 'tray',
+        launchAtLogin: true,
+        appearanceSection: 'progress',
+      },
+    },
+  }, schema)
+
+  assert.equal(schema.schemaVersion, 22)
+  assert.equal(legacy.ui.console.selectedPage, 'settings')
+  assert.equal(legacy.ui.console.onboardingVersion, 0)
+  assert.equal(legacy.ui.console.theme, 'system')
+  assert.equal(saved.ui.console.selectedPage, 'room')
+  assert.equal(saved.ui.console.onboardingVersion, 1)
+  assert.equal(saved.ui.console.theme, 'dark')
+  assert.equal(saved.ui.console.startupView, 'pill')
+  assert.equal(saved.ui.console.closeBehavior, 'tray')
+  assert.equal(saved.ui.console.launchAtLogin, true)
+  assert.equal(saved.ui.console.appearanceSection, 'progress')
 })

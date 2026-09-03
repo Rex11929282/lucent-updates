@@ -5,12 +5,18 @@ import { DEFAULT_STATE } from './defaults.js'
 // 兩個視窗（藥丸 / 設定）共用同一份狀態，透過主行程同步。
 export function useSharedState() {
   const [state, setState] = useState(DEFAULT_STATE)
+  const [hydrated, setHydrated] = useState(false)
 
   useEffect(() => {
     let mounted = true
-    ov.stateGet().then((s) => {
-      if (mounted && s) setState(s)
-    })
+    ov.stateGet()
+      .then((s) => {
+        if (mounted && s) setState(s)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setHydrated(true)
+      })
     const unsub = ov.onStateChanged((s) => s && setState(s))
     return () => {
       mounted = false
@@ -28,11 +34,6 @@ export function useSharedState() {
     ov.stateSet({ cfg: p })
   }, [])
 
-  const setLyricsRaw = useCallback((raw) => {
-    setState((prev) => ({ ...prev, lyricsRaw: raw }))
-    ov.stateSet({ lyricsRaw: raw })
-  }, [])
-
   const setProfiles = useCallback((profiles) => {
     setState((prev) => ({ ...prev, profiles }))
     ov.stateSet({ profiles })
@@ -48,5 +49,5 @@ export function useSharedState() {
     ov.updates.setSettings(patch)
   }, [])
 
-  return { state, setGlass, setCfg, setLyricsRaw, setProfiles, setUi, setUpdates }
+  return { state, hydrated, setGlass, setCfg, setProfiles, setUi, setUpdates }
 }

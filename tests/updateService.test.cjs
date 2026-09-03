@@ -37,7 +37,9 @@ test('service configures a safe feed, channel and delayed periodic checks', asyn
   service.start({ autoCheck: true, channel: 'beta' })
   assert.equal(updater.feed, null)
   assert.equal(updater.autoDownload, true)
-  assert.equal(updater.autoInstallOnAppQuit, true)
+  // A stale pending NSIS installer must never run merely because Lucent exits.
+  // Verified downloads are installed only through installIfSafe().
+  assert.equal(updater.autoInstallOnAppQuit, false)
   assert.equal(timeouts[0].ms, 30000)
   assert.equal(intervals[0].ms, 4 * 60 * 60 * 1000)
   await timeouts[0].fn()

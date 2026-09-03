@@ -19,6 +19,12 @@ test('room members cannot control a local player and desktop source keeps author
   assert.deepEqual(playerControlDecision({ roomMode: null, enabled: true, activeSource: 'desktop-netease' }), {
     ok: false, error: '電腦上的網易雲正在播放',
   })
+  assert.deepEqual(playerControlDecision({ roomMode: null, enabled: true, activeSource: 'desktop-spotify' }), {
+    ok: false, error: '電腦上的其他播放器正在播放',
+  })
+  assert.deepEqual(playerControlDecision({ roomMode: null, enabled: true, activeSource: 'desktop-generic' }), {
+    ok: false, error: '電腦上的其他播放器正在播放',
+  })
   assert.deepEqual(playerControlDecision({ roomMode: 'host', enabled: true, activeSource: 'internal-player' }), { ok: true })
 })
 

@@ -20,3 +20,12 @@ test('retired pill RGB border is absent while progress RGB remains', () => {
   assert.doesNotMatch(styles, /\.fx-border/)
   assert.match(styles, /\.progress\.rgb/)
 })
+
+test('liquid glass and fallback lyric panels are removed while mouse elasticity remains', () => {
+  const consoleWindow = read('src/ConsoleWindow.jsx')
+  assert.doesNotMatch(consoleWindow, /進階：液態玻璃參數/)
+  assert.doesNotMatch(consoleWindow, /備用歌詞（沒偵測到網易雲時）/)
+  assert.doesNotMatch(consoleWindow, /value="desktop"/)
+  assert.doesNotMatch(consoleWindow, /Slider label="Elasticity"/)
+  assert.match(consoleWindow, /Slider label=\{t\('ui\.look\.animation\.elasticity'\)\}[\s\S]*setGlass\(\{ elasticity: v \}\)/)
+})

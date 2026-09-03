@@ -10,11 +10,20 @@ function createBuildConfig(env = process.env) {
     appId: 'com.diowmow.lucentlyrics',
     productName: 'Lucent',
     icon: 'build/icon.ico',
+    compression: 'normal',
     files: [
       'dist/**/*',
       'electron/**/*',
       'shared/**/*',
       'build/icon.ico',
+      // 璃音只使用 API 模組，不會啟動該套件內附的 Web 伺服器；排除其示範與靜態網站素材。
+      '!node_modules/NeteaseCloudMusicApi/public/**/*',
+      '!**/*.map',
+      '!**/*.md',
+      '!**/*.MD',
+      '!**/*.markdown',
+      '!**/test/**/*',
+      '!**/tests/**/*',
     ],
     directories: { output: 'release' },
     publish: source ? [{
@@ -36,6 +45,7 @@ function createBuildConfig(env = process.env) {
       allowToChangeInstallationDirectory: true,
       createDesktopShortcut: true,
       createStartMenuShortcut: true,
+      include: 'build/installer.nsh',
     },
   }
 }

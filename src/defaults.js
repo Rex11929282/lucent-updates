@@ -12,6 +12,3 @@ export const DEFAULT_STATE = {
   ui: JSON.parse(JSON.stringify(schema.ui)),
   lyricsRaw: schema.lyricsRaw,
 }
-
-// Reset 按鈕用：還原成 rdev/liquid-glass-react demo 的原始預設
-export const GLASS_DEFAULTS = { ...schema.glassResetPreset }

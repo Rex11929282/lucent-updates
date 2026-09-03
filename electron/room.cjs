@@ -3,9 +3,11 @@
 const WebSocket = require('ws')
 const { EventEmitter } = require('events')
 const os = require('os')
+const { performance } = require('perf_hooks')
 const { createHash, randomUUID } = require('crypto')
 const { DEFAULT_MEMBER_CAPABILITIES, createCommandDeduper, normalizeCapabilities } = require('../shared/roomPolicy.cjs')
 const { reconnectDelay } = require('../shared/roomReconnect.cjs')
+const { createRoomClock } = require('../shared/roomClock.cjs')
 
 const PROTOCOL_VERSION = 2
 const QUEUE_FIELDS = ['id', 'provider', 'trackId', 'name', 'artist', 'cover', 'durationMs', 'requesterId', 'requesterName', 'status', 'position', 'createdAt', 'updatedAt']
@@ -22,14 +24,63 @@ function isPrivateLanIpv4(address) {
   return p[0] === 10 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168)
 }
 
-function getLanIp(ifaces = os.networkInterfaces()) {
-  const candidates = []
+function isRadminIpv4(address) {
+  const p = String(address || '').split('.').map(Number)
+  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) && p[0] === 26
+}
+
+// A machine can easily have several usable IPv4 addresses (real Ethernet/Wi-Fi
+// plus VPN adapters such as Radmin or Hamachi). Which one is "correct" depends
+// entirely on where the guests are: people on the same physical network need the
+// LAN address, people connected through the VPN need the VPN address. Picking one
+// automatically is guaranteed to be wrong for the other case, so expose all of
+// them and let the host choose; the automatic order is only the default.
+function classifyIpv4(address) {
+  if (isRadminIpv4(address)) return 'radmin'
+  if (isPrivateLanIpv4(address)) return 'lan'
+  return 'other'
+}
+
+function listLanIps(ifaces = os.networkInterfaces()) {
+  const found = []
   for (const name of Object.keys(ifaces)) {
     for (const ni of ifaces[name] || []) {
-      if (ni.family === 'IPv4' && !ni.internal) candidates.push(ni.address)
+      if (ni.family === 'IPv4' && !ni.internal) {
+        found.push({ address: ni.address, adapter: name, kind: classifyIpv4(ni.address) })
+      }
     }
   }
-  return candidates.find(isPrivateLanIpv4) || candidates[0] || '127.0.0.1'
+  // Radmin first preserves the existing behaviour for VPN users, then real LAN.
+  const rank = { radmin: 0, lan: 1, other: 2 }
+  return found.sort((a, b) => rank[a.kind] - rank[b.kind])
+}
+
+// `preferred` wins whenever it is still one of the machine's real addresses,
+// so a host's explicit choice survives re-reads without being silently reset.
+function getLanIp(ifaces = os.networkInterfaces(), preferred = '') {
+  const list = listLanIps(ifaces)
+  if (preferred && list.some((entry) => entry.address === preferred)) return preferred
+  return list[0]?.address || '127.0.0.1'
+}
+
+function socketPeerIp(sock) {
+  const address = String(sock?._socket?.remoteAddress || '').replace(/^::ffff:/, '')
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) ? address : ''
+}
+
+// JSON.parse succeeds on far more than objects: `null`, `123`, `"x"`, `true`
+// and `[]` are all valid JSON documents. Only an object can carry a protocol
+// message, and reading `.type` off `null` throws.
+//
+// That mattered: any device on the LAN could send the four bytes `null` to the
+// room port and the resulting TypeError wedged the entire main process — no
+// room, no window updates, not even DevTools, and nothing written to stderr.
+// Every message from a peer is now checked before a single field is read.
+function parseProtocolMessage(buf) {
+  let parsed
+  try { parsed = JSON.parse(buf.toString()) } catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  return parsed
 }
 
 function normalizeJoinTarget(value, defaultPort = 8787) {
@@ -45,12 +96,17 @@ function normalizeJoinTarget(value, defaultPort = 8787) {
 }
 
 class Room extends EventEmitter {
-  constructor({ WebSocketImpl = WebSocket, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout, reconnect = {} } = {}) {
+  constructor({ WebSocketImpl = WebSocket, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout, setIntervalFn = setInterval, clearIntervalFn = clearInterval, reconnect = {}, now = () => performance.now() } = {}) {
     super()
     this.WebSocket = WebSocketImpl
     this.setTimeoutFn = setTimeoutFn
     this.clearTimeoutFn = clearTimeoutFn
     this.reconnect = reconnect
+    this.now = now
+    this.setIntervalFn = setIntervalFn
+    this.clearIntervalFn = clearIntervalFn
+    this.clock = createRoomClock({ now })
+    this.clockTimer = null
     this.protocolVersion = PROTOCOL_VERSION
     this.mode = null // 'host' | 'member' | null
     this.wss = null
@@ -60,6 +116,7 @@ class Room extends EventEmitter {
     this.members = []
     this.code = null
     this.hostName = ''
+    this.advertiseIp = ''
     this.roomName = ''
     this.selfId = null
     this.selfName = ''
@@ -75,31 +132,34 @@ class Room extends EventEmitter {
   }
 
   // ---- 主持人 ----
-  startHost({ roomName, code, hostName, port = 8787 }) {
+  async startHost({ roomName, code, hostName, port = 8787, advertiseIp = '' }) {
     this.close()
     this.mode = 'host'
     this.selfId = 'host'
     this.selfName = hostName || '主持人'
     this.code = code || ''
     this.hostName = hostName || '主持人'
+    // Which address guests should be told to connect to. Empty means "decide
+    // automatically"; a value here is the host's explicit pick.
+    this.advertiseIp = String(advertiseIp || '')
     this.roomName = roomName || '我的房間'
     this.roomId = createHash('sha256').update(`${this.roomName}\0${this.code}`).digest('hex').slice(0, 24)
     this.roomRevision = 0
     this.queue = []
     this.commandDeduper = createCommandDeduper()
     try {
-      this.wss = new this.WebSocket.Server({ port, maxPayload: 64 * 1024 })
+      this.wss = new this.WebSocket.Server({ host: '0.0.0.0', port, maxPayload: 64 * 1024 })
     } catch (e) {
       this.emit('status', { mode: null, error: '無法開房：' + (e.message || e) })
       this.mode = null
       return { ok: false }
     }
     this.wss.on('connection', (sock) => {
-      sock._info = { id: '', name: '?', capabilities: { ...DEFAULT_MEMBER_CAPABILITIES } }
+      sock._info = { id: '', name: '?', ip: socketPeerIp(sock), capabilities: { ...DEFAULT_MEMBER_CAPABILITIES } }
       sock.on('message', (buf) => {
         if (buf.length > 64 * 1024) return sock.close(1009, '訊息過大')
-        let msg
-        try { msg = JSON.parse(buf.toString()) } catch { return }
+        const msg = parseProtocolMessage(buf)
+        if (!msg) return
         if (msg.type === 'hello') {
           if (this.code && msg.code !== this.code) {
             sock.send(JSON.stringify({ type: 'denied', reason: '房號錯誤' }))
@@ -118,6 +178,9 @@ class Room extends EventEmitter {
           }))
           if (this.state) sock.send(JSON.stringify({ type: 'state', state: this.state, roomRevision: this.roomRevision }))
           this._recomputeMembers()
+        } else if (msg.type === 'clock-ping' && sock._info.id && Number.isFinite(Number(msg.sentAt))) {
+          const hostReceivedAt = this.now()
+          sock.send(JSON.stringify({ type: 'clock-pong', sentAt: Number(msg.sentAt), hostReceivedAt, hostSentAt: this.now() }))
         } else if (msg.type === 'command' && sock._info.id) {
           const command = msg.command || {}
           if (!this.commandDeduper.accept(command.commandId)) return
@@ -138,16 +201,33 @@ class Room extends EventEmitter {
       sock.on('close', () => { this.clients.delete(sock); this._recomputeMembers() })
       sock.on('error', () => {})
     })
+    try {
+      await new Promise((resolve, reject) => {
+        const onListening = () => { this.wss.off('error', onError); resolve() }
+        const onError = (error) => { this.wss.off('listening', onListening); reject(error) }
+        this.wss.once('listening', onListening)
+        this.wss.once('error', onError)
+      })
+    } catch (e) {
+      try { this.wss.close() } catch {}
+      this.wss = null
+      this.mode = null
+      const error = '無法建立局域網房間：' + String(e.message || e)
+      this.emit('status', { mode: null, error })
+      return { ok: false, error }
+    }
     this.wss.on('error', (e) => this.emit('status', { error: String(e.message || e) }))
     this._recomputeMembers()
-    this.emit('status', { mode: 'host', roomName: this.roomName, code: this.code, ip: getLanIp(), port })
-    return { ok: true, ip: getLanIp(), port }
+    const actualPort = Number(this.wss.address?.()?.port) || port
+    const advertised = getLanIp(undefined, this.advertiseIp)
+    this.emit('status', { mode: 'host', roomName: this.roomName, code: this.code, ip: advertised, port: actualPort })
+    return { ok: true, ip: advertised, port: actualPort }
   }
 
   _recomputeMembers() {
     const list = [
       { id: 'host', name: this.hostName, host: true },
-      ...[...this.clients].map((c) => ({ id: c._info.id, name: c._info.name, capabilities: { ...c._info.capabilities } })),
+      ...[...this.clients].map((c) => ({ id: c._info.id, name: c._info.name, ip: c._info.ip, capabilities: { ...c._info.capabilities } })),
     ]
     this.members = list
     this.emit('members', list)
@@ -156,10 +236,10 @@ class Room extends EventEmitter {
 
   setState(state) {
     if (this.mode !== 'host') return
-    this.state = state
+    this.state = { ...state, hostAtMs: Number.isFinite(Number(state?.hostAtMs)) ? Number(state.hostAtMs) : this.now() }
     this.roomRevision += 1
-    this._broadcast({ type: 'state', state, roomRevision: this.roomRevision })
-    this.emit('state', state)
+    this._broadcast({ type: 'state', state: this.state, roomRevision: this.roomRevision })
+    this.emit('state', this.state)
   }
 
   setQueue(entries) {
@@ -203,8 +283,9 @@ class Room extends EventEmitter {
 
   tick(t) {
     if (this.mode !== 'host') return
-    this.emit('tick', t)
-    this._broadcast({ type: 'tick', ...t })
+    const tick = { ...t, hostAtMs: Number.isFinite(Number(t?.hostAtMs)) ? Number(t.hostAtMs) : this.now() }
+    this.emit('tick', tick)
+    this._broadcast({ type: 'tick', ...tick })
   }
 
   _broadcast(obj) {
@@ -249,6 +330,31 @@ class Room extends EventEmitter {
     this.reconnectTimer = null
   }
 
+  _startClockSync() {
+    if (this.clockTimer != null || this.mode !== 'member') return
+    const ping = () => this.sendClockPing()
+    ping()
+    this.clockTimer = this.setIntervalFn(ping, 3000)
+  }
+
+  _stopClockSync() {
+    if (this.clockTimer != null) this.clearIntervalFn(this.clockTimer)
+    this.clockTimer = null
+    this.clock.reset()
+  }
+
+  sendClockPing() {
+    if (this.mode !== 'member' || this.ws?.readyState !== this.WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify({ type: 'clock-ping', sentAt: this.now() }))
+    return true
+  }
+
+  _synchronizeSnapshot(snapshot) {
+    if (!snapshot || !this.clock.ready() || !Number.isFinite(Number(snapshot.hostAtMs))) return snapshot
+    const elapsed = snapshot.playing ? Math.max(0, this.clock.hostNow() - Number(snapshot.hostAtMs)) : 0
+    return { ...snapshot, positionMs: Math.max(0, Number(snapshot.positionMs) || 0) + elapsed }
+  }
+
   _scheduleReconnect() {
     if (this.reconnectTimer != null || this.intentionalClose || this.mode !== 'member' || !this.joinTarget) return
     const retryInMs = reconnectDelay(this.reconnectAttempt, this.reconnect)
@@ -280,12 +386,20 @@ class Room extends EventEmitter {
     })
     ws.on('message', (buf) => {
       if (this.ws !== ws) return
-      let m
-      try { m = JSON.parse(buf.toString()) } catch { return }
+      // The host is not automatically trustworthy either: a member must not be
+      // wedged by whatever the other end sends.
+      const m = parseProtocolMessage(buf)
+      if (!m) return
       if (m.type === 'state') {
-        this.state = m.state; this.roomRevision = Math.max(this.roomRevision, Number(m.roomRevision) || 0); this.emit('state', m.state)
+        this.state = this._synchronizeSnapshot(m.state); this.roomRevision = Math.max(this.roomRevision, Number(m.roomRevision) || 0); this.emit('state', this.state)
       }
-      else if (m.type === 'tick') this.emit('tick', m)
+      else if (m.type === 'tick') this.emit('tick', this._synchronizeSnapshot(m))
+      else if (m.type === 'clock-pong') {
+        const receivedAt = this.now()
+        const sync = this.clock.observePong({ ...m, receivedAt })
+        this.emit('clockPong', { ...m, receivedAt, ...sync })
+        this.emit('sync', { ...this.clock.snapshot(), quality: sync.rttMs <= 80 ? 'stable' : sync.rttMs <= 160 ? 'fair' : 'poor' })
+      }
       else if (m.type === 'members') this.emit('members', m.members)
       else if (m.type === 'welcome') {
         this.protocolVersion = Number(m.protocolVersion) || 1
@@ -297,6 +411,7 @@ class Room extends EventEmitter {
         this.reconnectAttempt = 0
         this.emit('queue', this.queue)
         this.emit('capabilities', this.capabilities)
+        this._startClockSync()
         this.emit('status', {
           mode: 'member', connected: true, reconnecting: false, error: '', roomName: m.roomName, hostName: m.hostName, selfId: m.selfId,
           roomId: this.roomId, roomRevision: this.roomRevision, capabilities: this.capabilities,
@@ -328,6 +443,7 @@ class Room extends EventEmitter {
     ws.on('close', () => {
       if (this.ws !== ws) return
       this.ws = null
+      this._stopClockSync()
       if (this.mode === 'member' && !this.intentionalClose) this._scheduleReconnect()
     })
     ws.on('error', (error) => {
@@ -355,6 +471,7 @@ class Room extends EventEmitter {
   close() {
     this.intentionalClose = true
     this._cancelReconnect()
+    this._stopClockSync()
     try {
       if (this.wss) { for (const c of this.clients) try { c.close() } catch {} ; this.wss.close() }
       if (this.ws) this.ws.close()
@@ -380,9 +497,12 @@ class Room extends EventEmitter {
     return {
       protocolVersion: this.protocolVersion, mode: this.mode, roomId: this.roomId, roomRevision: this.roomRevision,
       roomName: this.roomName, code: this.code, members: this.members, state: this.state,
-      queue: publicQueue(this.queue), capabilities: { ...this.capabilities }, selfId: this.selfId, ip: getLanIp(),
+      queue: publicQueue(this.queue), capabilities: { ...this.capabilities }, selfId: this.selfId,
+      ip: getLanIp(undefined, this.advertiseIp),
     }
   }
 }
 
-module.exports = { Room, getLanIp, normalizeJoinTarget }
+// parseProtocolMessage is exported so its tests can exercise the real guard.
+// A test that reimplements it would pass even if this file stopped using it.
+module.exports = { Room, getLanIp, listLanIps, normalizeJoinTarget, socketPeerIp, parseProtocolMessage }

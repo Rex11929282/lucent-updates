@@ -1,0 +1,86 @@
+name: Player compatibility
+description: A music player is not detected, or shows wrong metadata, artwork or lyrics
+labels: ["player-compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lucent reads whatever a player reports to Windows. Behaviour therefore depends entirely on
+        that specific app, which is why this template asks for its identifier and metadata.
+
+        **Without the `SourceAppUserModelId` a compatibility report usually cannot be acted on.**
+
+  - type: input
+    id: player
+    attributes:
+      label: Player name and version
+      placeholder: "foobar2000 2.1"
+    validations:
+      required: true
+
+  - type: input
+    id: appid
+    attributes:
+      label: SourceAppUserModelId
+      description: |
+        Run this in PowerShell while the player is playing, and paste the result:
+
+        ```powershell
+        [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime] > $null
+        $mgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult()
+        $mgr.GetSessions() | ForEach-Object { $_.SourceAppUserModelId }
+        ```
+      placeholder: "Spotify.exe"
+    validations:
+      required: true
+
+  - type: textarea
+    id: metadata
+    attributes:
+      label: Metadata the player exposes
+      description: Which of these are present, and what values do they have?
+      value: |
+        - Title:
+        - Artist:
+        - AlbumArtist:
+        - AlbumTitle:
+        - Thumbnail (present or not):
+        - Duration:
+        - Position (does it advance?):
+        - PlaybackStatus:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: detection
+    attributes:
+      label: Is the player detected at all?
+      options:
+        - Not detected — Lucent shows nothing
+        - Detected, but loses to another player
+        - Detected, but metadata is wrong
+        - Detected, but position does not advance
+    validations:
+      required: true
+
+  - type: textarea
+    id: artwork
+    attributes:
+      label: Artwork behavior
+      description: Does the cover appear, appear late, stay on the previous track, or never load?
+
+  - type: textarea
+    id: lyrics
+    attributes:
+      label: Lyric behavior
+      description: |
+        No lyrics, wrong song's lyrics, correct lyrics but out of sync, or lyrics that freeze?
+        If this is not music (podcast, video, stream), say so — Lucent should *not* show lyrics then.
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: true

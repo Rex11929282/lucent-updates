@@ -7,6 +7,9 @@ import {
   DECORATION_MODES,
   DEFAULT_LOOK_SECTIONS,
   PROGRESS_MODES,
+  normalizeFlowFillColorMode,
+  normalizeTextStyle,
+  TEXT_STYLE_OPTIONS,
   createAppearanceProfile,
   decorationControlsForMode,
   mergeLookSections,
@@ -16,6 +19,7 @@ import {
   resetDecorationConfig,
   upsertAppearanceProfile,
 } from '../src/appearanceModel.js'
+import { titleFitScale } from '../src/titleLayout.js'
 
 test('裝飾模式只有無、流星、櫻花與雪', () => {
   assert.deepEqual(DECORATION_MODES, ['none', 'meteor', 'sakura', 'snow'])
@@ -58,6 +62,21 @@ test('transparent skin never renders a pill background', () => {
   assert.equal(pillHasBackground('avatar'), false)
   assert.equal(pillHasBackground('glass'), true)
   assert.equal(pillHasBackground(undefined), true)
+})
+
+test('text style defaults and flow fill colour modes always fall back safely', () => {
+  assert.deepEqual(TEXT_STYLE_OPTIONS.map((style) => style.id), ['clean', 'slant', 'soft', 'neon', 'metal'])
+  assert.equal(normalizeTextStyle('slant'), 'slant')
+  assert.equal(normalizeTextStyle('unknown'), 'clean')
+  assert.equal(normalizeFlowFillColorMode('cover-gradient'), 'cover-gradient')
+  assert.equal(normalizeFlowFillColorMode('unknown'), 'fixed')
+})
+
+test('title fit compresses only overflowing names within the safe minimum', () => {
+  assert.equal(titleFitScale({ contentWidth: 100, trackWidth: 160 }), 1)
+  assert.equal(titleFitScale({ contentWidth: 200, trackWidth: 160 }), 0.8)
+  assert.equal(titleFitScale({ contentWidth: 1000, trackWidth: 160 }), 0.72)
+  assert.equal(titleFitScale({ contentWidth: 0, trackWidth: 160 }), 1)
 })
 
 test('外觀配置不會保存同步、視窗與定位參數', () => {
@@ -132,8 +151,9 @@ test('進度條 RGB、動畫與換句事件是互相獨立的 class', () => {
 
 test('進度條模式清單完整且未知模式安全回退', () => {
   assert.deepEqual(PROGRESS_MODES, [
-    'none', 'flow', 'breathe', 'pulse', 'bounce', 'segments',
+    'none', 'flow', 'breathe', 'pulse', 'bounce', 'segments', 'spectrum',
   ])
+  assert.ok(progressClasses({ progressAnim: 'spectrum' }, true).includes('prog-spectrum'))
   assert.ok(progressClasses({ progressAnim: 'unknown' }, false).includes('prog-none'))
 })
 
@@ -147,7 +167,7 @@ test('設定頁展開狀態保留已知值並補齊預設', () => {
 
 test('設定 schema 提供新版外觀、配置、進度條與裝飾預設', () => {
   const schema = JSON.parse(fs.readFileSync(new URL('../shared/defaults.json', import.meta.url), 'utf8'))
-  assert.equal(schema.schemaVersion, 12)
+  assert.equal(schema.schemaVersion, 22)
   assert.equal(schema.cfg.textClarity, 0.7)
   assert.equal(schema.cfg.progressAnim, 'flow')
   assert.equal(schema.cfg.segmentedBar, false)
@@ -155,8 +175,18 @@ test('設定 schema 提供新版外觀、配置、進度條與裝飾預設', () 
   assert.equal(schema.cfg.decorationCount, 18)
   assert.equal(schema.cfg.snowBrightness, 1)
   assert.equal(schema.cfg.hoverActivationDistance, 14)
+  assert.equal(schema.cfg.internalPlayerVolume, 0.8)
+  assert.equal(schema.cfg.textStyle, 'clean')
+  assert.equal(schema.cfg.flowFillColorMode, 'fixed')
+  assert.equal('spectrumSize' in schema.cfg, false)
+  assert.equal('spectrumAmplitude' in schema.cfg, false)
+  assert.equal(schema.cfg.oceanWave, false)
+  assert.equal(schema.cfg.oceanWaveOpacity, 0.32)
+  assert.equal(schema.cfg.oceanWaveAmplitude, 0.45)
+  assert.equal(schema.cfg.oceanWaveSpeed, 1)
   assert.deepEqual(schema.profiles, [])
   assert.deepEqual(schema.ui.lookSections, DEFAULT_LOOK_SECTIONS)
+  assert.equal(schema.ui.workbench.surface, 'glass')
 })
 
 test('new shaped sheen does not revive the removed legacy straight-line effect', () => {

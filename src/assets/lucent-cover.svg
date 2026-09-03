@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="璃音 Lucent 專輯封面">
+  <!-- 預覽藥丸用的專輯封面。實際顯示只有幾十 px，所以刻意用大色塊、
+       高對比、單一主體：一顆發光的液態玻璃藥丸浮在夜色上。 -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0" stop-color="#2b2b6b"/>
+      <stop offset=".48" stop-color="#1a1d44"/>
+      <stop offset="1" stop-color="#0e1026"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#fff8e8"/>
+      <stop offset=".7" stop-color="#ffdfa6"/>
+      <stop offset="1" stop-color="#f5b96d"/>
+    </radialGradient>
+    <linearGradient id="pill" x1="0" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".92"/>
+      <stop offset=".45" stop-color="#bfe4ff" stop-opacity=".62"/>
+      <stop offset="1" stop-color="#8f9dff" stop-opacity=".55"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#sky)"/>
+
+  <!-- 遠處的月亮 -->
+  <circle cx="356" cy="150" r="86" fill="url(#moon)"/>
+  <circle cx="356" cy="150" r="86" fill="none" stroke="#ffffff" stroke-opacity=".28" stroke-width="3"/>
+
+  <!-- 幾顆星 -->
+  <g fill="#ffffff" fill-opacity=".85">
+    <circle cx="88" cy="96" r="5"/>
+    <circle cx="150" cy="58" r="3.5"/>
+    <circle cx="196" cy="132" r="3"/>
+    <circle cx="452" cy="286" r="3.5"/>
+    <circle cx="76" cy="212" r="3"/>
+  </g>
+
+  <!-- 主體：液態玻璃藥丸 -->
+  <g>
+    <rect x="70" y="268" width="372" height="128" rx="64" fill="#0b0d1f" fill-opacity=".45"/>
+    <rect x="64" y="258" width="372" height="128" rx="64" fill="url(#pill)"/>
+    <rect x="64" y="258" width="372" height="128" rx="64" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="4"/>
+    <rect x="88" y="276" width="200" height="26" rx="13" fill="url(#sheen)"/>
+  </g>
+
+  <!-- 藥丸上的音符與歌詞線 -->
+  <g fill="#16204a">
+    <path d="M300 292v66a26 26 0 1 1-16-24v-56l64-15v52a26 26 0 1 1-16-24v-46z"/>
+    <rect x="112" y="316" width="128" height="14" rx="7" fill-opacity=".55"/>
+    <rect x="112" y="342" width="86" height="12" rx="6" fill-opacity=".35"/>
+  </g>
+</svg>

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ov } from './overlayBridge.js'
+import { applyScheduledState, positionMsOf, shouldScheduleVisualTick } from './roomClockRuntime.js'
+
+export { applyScheduledState, positionMsOf, shouldScheduleVisualTick }
 
 // 房間狀態 + 播放時鐘（成員/主持人共用）。
 // clockRef 存 {positionMs, playing, at}；用本地時鐘內插出平滑進度。
@@ -11,6 +14,7 @@ export function useRoom() {
   const [queue, setQueue] = useState([])
   const [capabilities, setCapabilities] = useState({ 'song.request': true, 'queue.manage': false, 'playback.control': false })
   const [commandResult, setCommandResult] = useState(null)
+  const [clockRevision, setClockRevision] = useState(0)
   const clockRef = useRef({ positionMs: 0, playing: false, at: 0 })
 
   useEffect(() => {
@@ -19,6 +23,7 @@ export function useRoom() {
       const active = !!nextPlaying
       clockRef.current = { positionMs: positionMs || 0, playing: active, at: performance.now() }
       setPlaying((previous) => previous === active ? previous : active)
+      if (!active) setClockRevision((revision) => revision + 1)
     }
     ov.room.snapshot().then((snap) => {
       if (!mounted || !snap) return
@@ -49,10 +54,5 @@ export function useRoom() {
     return () => { mounted = false; offState(); offTick(); offMembers(); offStatus(); offQueue(); offCapabilities(); offCommandResult() }
   }, [])
 
-  return { status, members, state, setState, clockRef, playing, queue, capabilities, commandResult }
-}
-
-export function positionMsOf(clock) {
-  if (!clock) return 0
-  return clock.playing ? clock.positionMs + (performance.now() - clock.at) : clock.positionMs
+  return { status, members, state, setState, clockRef, clockRevision, playing, queue, capabilities, commandResult }
 }

@@ -11,7 +11,9 @@ const {
   initialSongTransition,
   isTransitionEffectsPaused,
   particleTransitionDuration,
+  particleMotion,
   shatterSnapshotForPhase,
+  shouldHidePillDuringTransition,
 } = songTransition
 
 test('song transition stays in place through collapse hold expand and idle', () => {
@@ -64,12 +66,46 @@ test('particle shatter stays scattered until the next song is ready, then rebuil
   assert.equal(state.phase, 'idle')
 })
 
+test('strict shatter visibility hides the pill only while particles are on screen', () => {
+  assert.equal(shouldHidePillDuringTransition('shatter', 'capture-out'), false)
+  assert.equal(shouldHidePillDuringTransition('shatter', 'shatter-out'), true)
+  assert.equal(shouldHidePillDuringTransition('shatter', 'dormant'), true)
+  assert.equal(shouldHidePillDuringTransition('shatter', 'shatter-in'), true)
+  assert.equal(shouldHidePillDuringTransition('shatter', 'idle'), false)
+  assert.equal(shouldHidePillDuringTransition('scale', 'shatter-in'), false)
+})
+
+test('Capsule uses the strict shatter visibility rule without hiding the particle layer', async () => {
+  const capsule = await readFile(new URL('../src/components/Capsule.jsx', import.meta.url), 'utf8')
+
+  assert.match(capsule, /import\s*\{\s*particleTransitionDuration,\s*shouldHidePillDuringTransition\s*\}\s*from '\.\.\/songTransition\.js'/)
+  assert.match(capsule, /shouldHidePillDuringTransition\(cfg\.songTransitionMode,\s*transitionPhase\)/)
+  assert.match(capsule, /\{content\}\s*\{!preview && <SongTransitionLayer/)
+  assert.match(capsule, /onInFinished=\{onInFinished\}/)
+})
+
+test('shatter CSS keeps live pill content hidden until the particle completion handoff', async () => {
+  const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+
+  assert.match(css, /\.content--shatter-hidden\s*\{[^}]*opacity:\s*0[^}]*pointer-events:\s*none[^}]*\}/s)
+  assert.match(css, /\.content--shatter-out,[\s\S]*?\.content--dormant,[\s\S]*?\.content--shatter-in\s*\{[^}]*opacity:\s*0[^}]*\}/)
+  assert.doesNotMatch(css, /particleContentOut|particleContentIn/)
+})
+
+test('particle rebuild completes after two animation frames before revealing the next pill', async () => {
+  const transition = await readFile(new URL('../src/components/SongTransitionLayer.jsx', import.meta.url), 'utf8')
+
+  assert.match(transition, /completionRef\.current\s*=\s*requestAnimationFrame\(\(\)\s*=>\s*\{\s*completionRef\.current\s*=\s*requestAnimationFrame\(completeIn\)/s)
+  assert.match(transition, /const completeIn = \(\) => \{[\s\S]*?onInFinished\?\.\(\)/)
+  assert.match(transition, /fallbackTimer = window\.setTimeout\(/)
+})
+
 test('particle layouts are finite, clipped to their source and differ by seed', () => {
   const first = createShatterParticles({ width: 320, height: 92, seed: 1, count: 16 })
   const second = createShatterParticles({ width: 320, height: 92, seed: 2, count: 16 })
   const capped = createShatterParticles({ width: 320, height: 92, seed: 3, count: 200 })
   assert.equal(first.length, 16)
-  assert.equal(capped.length, 72)
+  assert.equal(capped.length, 128)
   assert.notDeepEqual(first, second)
   assert.ok(first.every((particle) => (
     particle.x >= 0 && particle.y >= 0
@@ -89,18 +125,45 @@ test('particle layouts are finite, clipped to their source and differ by seed', 
 })
 
 test('particle shatter drifts apart and rebuilds slowly while respecting transition speed', () => {
-  assert.equal(particleTransitionDuration('shatter-out', 1), 900)
-  assert.equal(particleTransitionDuration('shatter-in', 1), 850)
-  assert.equal(particleTransitionDuration('shatter-out', 2), 450)
-  assert.equal(particleTransitionDuration('shatter-in', 0.5), 1700)
+  assert.equal(particleTransitionDuration('shatter-out', 1), 1000)
+  assert.equal(particleTransitionDuration('shatter-in', 1), 1200)
+  assert.equal(particleTransitionDuration('shatter-out', 2), 500)
+  assert.equal(particleTransitionDuration('shatter-in', 0.5), 2400)
+})
+
+test('particle layout permits dense but bounded reconstruction coverage', () => {
+  const particles = createShatterParticles({ width: 320, height: 92, seed: 3, count: 200 })
+  assert.equal(particles.length, 128)
+  assert.ok(particles.every((particle) => particle.rebuildDelay >= 0 && particle.rebuildDelay <= 0.55))
+  assert.equal(particleMotion(1, true).opacity, 0)
+  assert.ok(particleMotion(0.55, true, 0).opacity > 0)
+  assert.equal(particleMotion(0.25, true, 0.4).opacity, 0)
+})
+
+test('particle shatter directions are fully random instead of only radiating from the pill center', () => {
+  const particles = createShatterParticles({ width: 320, height: 92, seed: 9, count: 64 })
+  const directionsTowardCenter = particles.filter((particle) => {
+    const fromCenterX = particle.x + particle.w / 2 - 160
+    const fromCenterY = particle.y + particle.h / 2 - 46
+    return particle.dx * fromCenterX + particle.dy * fromCenterY < 0
+  })
+  assert.ok(directionsTowardCenter.length > 8)
+})
+
+test('particle shatter fades while scattering and each particle fades out after rebuilding', () => {
+  assert.ok(particleMotion(0, false).opacity > particleMotion(1, false).opacity)
+  assert.ok(particleMotion(0, true).opacity < particleMotion(0.55, true).opacity)
+  assert.ok(particleMotion(0.55, true).opacity > particleMotion(1, true).opacity)
+})
+
+test('dormant particles retain a visible low-brightness hold until rebuilding starts', () => {
+  assert.ok(particleMotion(1, false, 0, true).opacity >= 0.16)
+  assert.ok(particleMotion(1, false, 0, true).opacity < particleMotion(0, false).opacity)
 })
 
 test('a failed screenshot never leaves shatter hidden forever', () => {
   let state = advanceSongTransition(initialSongTransition(), { type: 'end', revision: 5, at: 10 })
   state = advanceSongTransition(state, { type: 'snapshot-failed', revision: 5, at: 20 })
-  assert.equal(state.phase, 'dormant')
-  state = advanceSongTransition(state, { type: 'next-ready', revision: 5, at: 30 })
-  state = advanceSongTransition(state, { type: 'snapshot-failed', revision: 5, at: 40 })
   assert.equal(state.phase, 'idle')
 })
 
@@ -126,6 +189,32 @@ test('a new revision restarts transition state while one canvas survives its par
   assert.match(transition, /key=\{revision\}/)
 })
 
+test('transition layer uses bounded dense particles and delays completion past its final paint', async () => {
+  const layer = await readFile(new URL('../src/components/SongTransitionLayer.jsx', import.meta.url), 'utf8')
+  assert.match(layer, /count: 112/)
+  assert.match(layer, /completionRef/)
+})
+
+test('rebuild particles use one incoming cover palette and preserve old colours before rebuilding', async () => {
+  const layer = await readFile(new URL('../src/components/SongTransitionLayer.jsx', import.meta.url), 'utf8')
+  assert.match(layer, /incomingCoverUrl/)
+  assert.match(layer, /extractCoverPalette/)
+  assert.match(layer, /paletteRef\.current/)
+  assert.match(layer, /mixPaletteColor\(particle\.color, targetColor, colorAmount\)/)
+  assert.match(layer, /phase === 'shatter-in'/)
+})
+
+test('App keeps song cover available when the cover background is disabled', async () => {
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(app, /songCoverUrl: standby \? '' : usableSongCover/)
+  assert.match(app, /songCoverUrl=\{transitionVisual\.songCoverUrl\}/)
+})
+
+test('Capsule forwards the real next-song cover into the particle transition', async () => {
+  const capsule = await readFile(new URL('../src/components/Capsule.jsx', import.meta.url), 'utf8')
+  assert.match(capsule, /incomingCoverUrl=\{songCoverUrl\}/)
+})
+
 test('expand owns its completion timer so the hold effect cannot cancel it early', async () => {
   const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')
   const holdGate = app.indexOf("songTransition.phase !== 'hold'")
@@ -140,6 +229,13 @@ test('expand owns its completion timer so the hold effect cannot cancel it early
 test('the first detected song does not play a replacement transition from the empty state', async () => {
   const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')
   assert.match(app, /!songKey \|\| songKey === 'none'/)
+})
+
+test('collapse transition keeps its old visual until the next song artwork is ready', async () => {
+  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(app, /roomState\?\.song\?\.loading !== false/)
+  assert.match(app, /roomState\?\.song\?\.artworkReady === false/)
+  assert.match(app, /artworkReadyRevision !== nextRevision/)
 })
 
 test('schema provides shaped sheen and in-place song transition defaults', () => {
@@ -164,7 +260,7 @@ test('only Capsule owns overlay window sizing so hover transforms cannot resize 
   assert.doesNotMatch(capsule, /getBoundingClientRect\s*\(/)
 })
 
-test('shatter uses one crop canvas instead of cloning the complete pill DOM', async () => {
+test('shatter uses one crop canvas and a clipped local fallback instead of cloning the complete pill DOM', async () => {
   const transition = await readFile(new URL('../src/components/SongTransitionLayer.jsx', import.meta.url), 'utf8')
   const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
 
@@ -173,13 +269,32 @@ test('shatter uses one crop canvas instead of cloning the complete pill DOM', as
   assert.match(transition, /createShatterParticles/)
   assert.match(transition, /phase === 'dormant'/)
   assert.match(transition, /context\.arc\(/)
+  assert.match(transition, /context\.clip\(\)/)
   assert.doesNotMatch(transition, /phase !== 'capture-in'/)
-  assert.doesNotMatch(transition, /context\.clip\(\)/)
   assert.doesNotMatch(transition, /cloneNode/)
   assert.doesNotMatch(transition, /dangerouslySetInnerHTML/)
   assert.doesNotMatch(transition, /SHATTER_PARTICLES/)
   assert.match(css, /\.glass:has\(\.content--shatter-hidden\)/)
   assert.match(css, /\.song-transition-layer/)
+})
+
+test('pill capture uses a bounded Chromium path and a local visual fallback', async () => {
+  const main = await readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8')
+  const preload = await readFile(new URL('../electron/preload.cjs', import.meta.url), 'utf8')
+  assert.match(main, /capturePage\(rect, \{ stayHidden: true, stayAwake: true \}\)/)
+  assert.doesNotMatch(main, /Page\.captureScreenshot/)
+  assert.match(main, /capture page timeout/)
+  assert.match(preload, /setTimeout\(\(\) => finish\(null\), 900\)/)
+  assert.match(main, /ipcMain\.on\('overlay:capturePill:start'/)
+  assert.match(main, /setImmediate\(async \(\) =>/)
+  assert.match(preload, /ipcRenderer\.send\('overlay:capturePill:start'/)
+  assert.match(preload, /overlay:capturePill:result/)
+})
+
+test('a failed pill capture still creates a particle source instead of hanging the transition', async () => {
+  const transition = await readFile(new URL('../src/components/SongTransitionLayer.jsx', import.meta.url), 'utf8')
+  assert.match(transition, /function createFallbackSnapshot\(/)
+  assert.match(transition, /const snapshotDataUrl = dataUrl \|\| createFallbackSnapshot\(source, crop\)/)
 })
 
 test('LiquidGlass auxiliary direct layers are suppressed without hiding the actual glass surface', async () => {

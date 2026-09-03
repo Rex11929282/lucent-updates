@@ -2,13 +2,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Capsule from './components/Capsule.jsx'
 import { ov } from './overlayBridge.js'
 import { useSharedState } from './useSharedState.js'
-import { useRoom, positionMsOf } from './useRoom.js'
-import { DEMO_LYRICS, parseLyrics, lineIndexAt, totalDuration } from './lyrics.js'
+import { useRoom, positionMsOf, shouldScheduleVisualTick } from './useRoom.js'
+import { lineIndexAt, totalDuration } from './lyrics.js'
 import {
   currentSongLyric,
-  flowFillRatioForLine,
-  flowFillRatioForTimedLine,
+  activeFlowFillRatio,
+  displayFlowFillRatio,
+  flowDisplayMirror,
   hasActiveSong,
+  holdFlowFillRatio,
   lyricLineIdentity,
   mirrorFallbackRatio,
   mirrorFlowFillRatio,
@@ -16,6 +18,7 @@ import {
   mirrorMatchesSong,
   nextMirrorTiming,
   rendererSongRevisionKey,
+  shouldCommitDisplayMirror,
 } from './songDisplay.js'
 import {
   advanceSongTransition,
@@ -23,18 +26,45 @@ import {
   isTransitionEffectsPaused,
   visualForSongTransition,
 } from './songTransition.js'
+import { EMPTY_AUDIO_SPECTRUM } from './audioSpectrum.js'
+import { preloadArtwork } from './artworkCache.js'
+import { idleCapsulePresentation } from './idleCapsule.js'
+import { LUCENT_AVATAR_ASSET, LUCENT_COVER_ASSET } from './brandAssets.js'
+import { createTranslator, detectSystemLocale, resolveLocale } from './i18n.js'
 
 export default function App() {
   const containerRef = useRef(null)
   const capsuleRef = useRef(null)
   const transitionWrapRef = useRef(null)
+  const [consoleCollapsed, setConsoleCollapsed] = useState(false)
   const { state } = useSharedState()
   const { glass, cfg, lyricsRaw } = state
-  const { state: roomState, clockRef, playing: roomPlaying } = useRoom()
+  const activeLocale = resolveLocale(state.ui?.locale, detectSystemLocale())
+  const t = useMemo(() => createTranslator(activeLocale), [activeLocale])
+  const { state: roomState, status: roomStatus, clockRef, clockRevision, playing: roomPlaying } = useRoom()
+  const audioSpectrumRef = useRef(EMPTY_AUDIO_SPECTRUM)
+  const spectrumActive = roomState?.source === 'internal-player'
+
+  useEffect(() => ov.player.onSpectrum((frame) => {
+    const bands = Array.isArray(frame?.bands)
+      ? frame.bands.slice(0, 32).map((value) => Math.max(0, Math.min(1, Number(value) || 0)))
+      : []
+    audioSpectrumRef.current = frame?.active === true && bands.length
+      ? { active: true, sequence: Math.max(0, Math.floor(Number(frame.sequence) || 0)), bands }
+      : EMPTY_AUDIO_SPECTRUM
+  }), [])
+
+  useEffect(() => {
+    if (!spectrumActive) audioSpectrumRef.current = EMPTY_AUDIO_SPECTRUM
+  }, [spectrumActive])
+
+  useEffect(() => ov.onConsoleVisibility((value) => setConsoleCollapsed(!!value)), [])
 
   // 有偵測到歌（即使歌詞還在抓）就不要退回示範字幕，否則換歌會閃一下 DEMO
   const hasRoomSong = hasActiveSong(roomState)
-  const hasRoomLyrics = !!(hasRoomSong && roomState.lines?.length)
+  const standby = !hasRoomSong || roomState?.song?.loading === true
+  const idlePresentation = idleCapsulePresentation({ roomMode: roomStatus?.mode, song: roomState?.song, t })
+  const hasRoomLyrics = !!(!standby && roomState.lines?.length)
   const songKey = rendererSongRevisionKey(roomState?.song)
   const [songTransition, setSongTransition] = useState(initialSongTransition)
   const transitionRevisionRef = useRef(0)
@@ -42,6 +72,7 @@ export default function App() {
   const stableVisualRef = useRef(null)
   const [frozenVisual, setFrozenVisual] = useState(null)
   const [artworkReadyRevision, setArtworkReadyRevision] = useState(0)
+  const [failedArtworkUrls, setFailedArtworkUrls] = useState(() => new Set())
   const handledEndTokenRef = useRef(0)
   const transitionModeRef = useRef(cfg.songTransitionMode)
   const pendingSongChange = cfg.songTransitionMode !== 'shatter'
@@ -89,31 +120,24 @@ export default function App() {
     const revision = Number(song?.revision) || 0
     if (!revision || song?.loading !== false || song?.artworkReady === false) {
       setArtworkReadyRevision(0)
+      setFailedArtworkUrls(new Set())
       return undefined
     }
-    const urls = [...new Set([song.cover, song.avatar].filter(Boolean))]
+    const urls = [...new Set([song.cover, song.artistImageUrl, song.avatar].filter(Boolean))]
     if (!urls.length) {
+      setFailedArtworkUrls(new Set())
       setArtworkReadyRevision(revision)
       return undefined
     }
     let cancelled = false
-    Promise.all(urls.map((url) => new Promise((resolve) => {
-      const image = new Image()
-      let settled = false
-      const finish = () => {
-        if (settled) return
-        settled = true
-        resolve()
+    Promise.all(urls.map((url) => preloadArtwork(url))).then((results) => {
+      if (!cancelled) {
+        setFailedArtworkUrls(new Set(results.filter((result) => !result.ok).map((result) => result.url)))
+        setArtworkReadyRevision(revision)
       }
-      image.onload = finish
-      image.onerror = finish
-      image.src = url
-      if (image.complete) finish()
-    }))).then(() => {
-      if (!cancelled) setArtworkReadyRevision(revision)
     })
     return () => { cancelled = true }
-  }, [roomState?.song?.revision, roomState?.song?.loading, roomState?.song?.artworkReady, roomState?.song?.cover, roomState?.song?.avatar])
+  }, [roomState?.song?.revision, roomState?.song?.loading, roomState?.song?.artworkReady, roomState?.song?.cover, roomState?.song?.artistImageUrl, roomState?.song?.avatar])
 
   useLayoutEffect(() => {
     const token = Number(roomState?.transition?.token) || 0
@@ -127,22 +151,32 @@ export default function App() {
   }, [cfg.songTransitionMode, roomState?.transition?.token])
 
   useLayoutEffect(() => {
-    if (songTransition.phase !== 'hold' || roomState?.song?.loading !== false) return undefined
+    const nextRevision = Number(roomState?.song?.revision) || 0
+    if (
+      songTransition.phase !== 'hold'
+      || roomState?.song?.loading !== false
+      || roomState?.song?.artworkReady === false
+      || !nextRevision
+      || artworkReadyRevision !== nextRevision
+    ) return undefined
     const { revision } = songTransition
     setSongTransition((state) => advanceSongTransition(state, { type: 'ready', revision, at: performance.now() }))
     return undefined
-  }, [songTransition.phase, songTransition.revision, roomState?.song?.loading])
+  }, [songTransition.phase, songTransition.revision, roomState?.song?.revision, roomState?.song?.loading, roomState?.song?.artworkReady, artworkReadyRevision])
 
   useLayoutEffect(() => {
     if (cfg.songTransitionMode !== 'shatter' || songTransition.phase !== 'dormant') return undefined
     const readyRevision = Number(roomState?.transition?.readySongRevision) || 0
     const endedRevision = Number(roomState?.transition?.endedSongRevision) || 0
-    if (!readyRevision || readyRevision === endedRevision || artworkReadyRevision !== readyRevision) return undefined
+    const lyricReady = !!roomState?.mirror?.text
+      || !!roomState?.lines?.length
+      || roomState?.syncStatus === 'no-precise-data'
+    if (!readyRevision || readyRevision === endedRevision || artworkReadyRevision !== readyRevision || !lyricReady) return undefined
     setSongTransition((current) => advanceSongTransition(current, {
       type: 'next-ready', revision: current.revision, at: performance.now(),
     }))
     return undefined
-  }, [cfg.songTransitionMode, songTransition.phase, roomState?.transition?.readySongRevision, roomState?.transition?.endedSongRevision, artworkReadyRevision])
+  }, [cfg.songTransitionMode, songTransition.phase, roomState?.transition?.readySongRevision, roomState?.transition?.endedSongRevision, roomState?.mirror?.text, roomState?.lines?.length, roomState?.syncStatus, artworkReadyRevision])
 
   useLayoutEffect(() => {
     if (songTransition.phase !== 'expand') return undefined
@@ -172,26 +206,35 @@ export default function App() {
     }))
   }, [])
 
-  const localParsed = useMemo(
-    () => (lyricsRaw.trim() ? parseLyrics(lyricsRaw) : { lines: DEMO_LYRICS, timed: false }),
-    [lyricsRaw]
-  )
-  const lines = hasRoomLyrics ? roomState.lines : (hasRoomSong ? [] : localParsed.lines)
-  const timed = hasRoomLyrics ? roomState.timed : (hasRoomSong ? false : localParsed.timed)
+  const lines = hasRoomLyrics ? roomState.lines : []
+  const timed = hasRoomLyrics ? roomState.timed : false
 
   const [localPlaying, setLocalPlaying] = useState(false)
+  const visualClockPlaying = !standby && shouldScheduleVisualTick({ hasRoomSong, roomPlaying, localPlaying: false })
   const [curIdx, setCurIdx] = useState(0)
   const localTimeRef = useRef(0)
   const lastTsRef = useRef(0)
   const progressRef = useRef(0)
   const karaokeRef = useRef(0) // 目前這行的逐字填光比例 0~1
   const lyricFillRef = useRef(0)
+  const lyricFillActiveRef = useRef(false)
+  const displayMirrorRef = useRef({ songKey: '', mirror: null })
+  const pendingDisplayMirrorRef = useRef(null)
+  const [displayMirrorState, setDisplayMirrorState] = useState({ songKey: '', mirror: null })
+  const commitDisplayMirror = useCallback((entry) => {
+    if (!shouldCommitDisplayMirror(displayMirrorRef.current, entry)) return false
+    displayMirrorRef.current = entry
+    setDisplayMirrorState(entry)
+    return true
+  }, [])
 
-  const songDurSec = hasRoomSong ? (roomState?.song?.durationMs || 0) / 1000 : 0
+  const songDurSec = !standby && hasRoomSong ? (roomState?.song?.durationMs || 0) / 1000 : 0
 
   // 統一時鐘：房間有歌 → 用同步進度；否則本地示範播放
   useEffect(() => {
-    const id = setInterval(() => {
+    let frame = 0
+    let stopped = false
+    const tick = () => {
       let posSec
       if (hasRoomSong) {
         posSec = positionMsOf(clockRef.current) / 1000
@@ -214,30 +257,52 @@ export default function App() {
         posSec,
         durSec,
       }
+      const displayedMirror = displayMirrorRef.current
+      const pendingMirror = pendingDisplayMirrorRef.current
+      if (pendingMirror?.songKey === songKey && displayedMirror?.songKey === songKey && displayedMirror.mirror) {
+        const selected = flowDisplayMirror({
+          previous: displayedMirror.mirror,
+          incoming: pendingMirror.mirror,
+          lines,
+          position: posSec,
+        })
+        if (selected === pendingMirror.mirror) {
+          const entry = { songKey, mirror: pendingMirror.mirror }
+          pendingDisplayMirrorRef.current = null
+          displayMirrorRef.current = entry
+          setDisplayMirrorState(entry)
+        }
+      }
       // 鏡像模式：鏡像決定顯示句，YRC 時間軸決定逐字填光；無匹配/逐字資料才用平均句長。
       if (mirrorRef.current.active) {
         const m = mirrorRef.current
         const fallbackRatio = mirrorFallbackRatio(m, performance.now())
-        lyricFillRef.current = mirrorFlowFillRatio({
+        const fillRatio = mirrorFlowFillRatio({
           lines,
           mirrorText: m.text,
           mirrorIndex: m.i,
           position: posSec,
-        }) ?? 0
+        })
+        const displayRatio = displayFlowFillRatio(fillRatio)
+        lyricFillActiveRef.current = Number.isFinite(displayRatio)
+        lyricFillRef.current = lyricFillActiveRef.current
+          ? holdFlowFillRatio(lyricFillRef.current, displayRatio)
+          : 0
         karaokeRef.current = mirrorKaraokeRatio({
           lines,
           mirrorText: m.text,
           position: posSec,
           fallbackRatio,
         })
+        if (!stopped && visualClockPlaying) frame = requestAnimationFrame(tick)
         return
       }
       // 卡拉OK：有 YRC 逐字時間軸就精準到字；否則整行等速填光
       if (idx >= 0) {
         const cur = lines[idx]
-        lyricFillRef.current = flowFillRatioForLine(cur, posSec)
-          ?? flowFillRatioForTimedLine(lines, cur, posSec)
-          ?? 0
+        const displayRatio = displayFlowFillRatio(activeFlowFillRatio({ lines, line: cur, position: posSec }))
+        lyricFillActiveRef.current = Number.isFinite(displayRatio)
+        lyricFillRef.current = lyricFillActiveRef.current ? displayRatio : 0
         if (cur?.words?.length) {
           // 逐字：算已唱完的字元比例（字內插值）。
           // 必須用 Array.from 計數，與畫面上 Array.from(text) 產生的 span 數一致
@@ -264,20 +329,57 @@ export default function App() {
       } else {
         karaokeRef.current = 0
         lyricFillRef.current = 0
+        lyricFillActiveRef.current = false
       }
-    }, 80)
-    return () => { clearInterval(id); lastTsRef.current = 0 }
-  }, [hasRoomSong, localPlaying, lines, timed, cfg.secondsPerLine, songDurSec, clockRef])
+      if (!stopped && visualClockPlaying) frame = requestAnimationFrame(tick)
+    }
+    tick()
+    return () => { stopped = true; cancelAnimationFrame(frame); lastTsRef.current = 0 }
+  }, [hasRoomSong, roomPlaying, localPlaying, visualClockPlaying, lines, timed, cfg.secondsPerLine, songDurSec, clockRef, clockRevision, songKey])
 
   // 優先鏡像網易雲畫面上正在高亮的那一句：由網易雲自己決定，天生同步，
   // 完全不需要時間軸計算（同步問題的根本解）。抓不到時才退回時間軸推算。
   const mirror = roomState?.mirror
-  const useMirror = mirrorMatchesSong(mirror, roomState?.song)
-  const lineIdentity = lyricLineIdentity({ songKey, useMirror, mirror, curIdx })
+  const waitingForIdentity = roomState?.syncStatus === 'waiting-identity'
+    || roomState?.syncStatus === 'no-precise-data'
+  const useMirror = !waitingForIdentity && mirrorMatchesSong(mirror, roomState?.song)
+  const displayMirror = useMirror && displayMirrorState.songKey === songKey && displayMirrorState.mirror
+    ? displayMirrorState.mirror
+    : mirror
+
+  useLayoutEffect(() => {
+    if (!useMirror || !mirror?.text) {
+      pendingDisplayMirrorRef.current = null
+      const entry = { songKey, mirror: null }
+      commitDisplayMirror(entry)
+      return undefined
+    }
+    const previous = displayMirrorRef.current?.songKey === songKey
+      ? displayMirrorRef.current.mirror
+      : null
+    if (!previous) {
+      const entry = { songKey, mirror }
+      commitDisplayMirror(entry)
+      return undefined
+    }
+    const position = positionMsOf(clockRef.current) / 1000
+    const selected = flowDisplayMirror({ previous, incoming: mirror, lines, position })
+    if (selected === previous) {
+      pendingDisplayMirrorRef.current = { songKey, mirror }
+      return undefined
+    }
+    pendingDisplayMirrorRef.current = null
+    const entry = { songKey, mirror }
+    commitDisplayMirror(entry)
+    return undefined
+  }, [useMirror, mirror?.i, mirror?.text, mirror?.trans, lines, songKey, clockRef, commitDisplayMirror])
+
+  const lineIdentity = lyricLineIdentity({ songKey, useMirror, mirror: displayMirror, curIdx })
 
   useLayoutEffect(() => {
     karaokeRef.current = 0
     lyricFillRef.current = 0
+    lyricFillActiveRef.current = false
   }, [lineIdentity])
 
   // 記錄鏡像句的換句時刻與最近平均句長，供卡拉OK填光推算
@@ -287,6 +389,7 @@ export default function App() {
     progressRef.current = { ratio: 0, posSec: 0, durSec: 0 }
     karaokeRef.current = 0
     lyricFillRef.current = 0
+    lyricFillActiveRef.current = false
     setCurIdx(0)
     const state = mirrorRef.current
     state.active = false
@@ -308,14 +411,15 @@ export default function App() {
 
   const curLine = currentSongLyric({
     song: roomState?.song,
-    mirror: useMirror ? mirror : null,
+    mirror: useMirror ? displayMirror : null,
     lines,
     curIdx,
+    syncStatus: roomState?.syncStatus,
   })
   // 雙語：該句的翻譯（沒有翻譯的歌就不顯示第二行）
   const curTrans = !cfg.bilingual
     ? ''
-    : (useMirror ? (mirror.trans || '') : (curIdx >= 0 ? lines[curIdx]?.trans || '' : ''))
+    : (waitingForIdentity ? '' : (useMirror ? (displayMirror?.trans || '') : (curIdx >= 0 ? lines[curIdx]?.trans || '' : '')))
   // 這首歌是否有翻譯：整首固定保留翻譯列，避免逐句忽高忽低造成玻璃重算閃爍
   const songHasTrans = useMemo(
     () => !!(cfg.bilingual && lines.some((l) => l && l.trans)),
@@ -324,14 +428,12 @@ export default function App() {
   const nextLine = curIdx + 1 < lines.length ? lines[curIdx + 1]?.text : ''
 
   const onCapsuleClick = useCallback(() => {
-    if (hasRoomSong) { ov.player.toggle(); return }
-    setLocalPlaying((p) => !p)
-  }, [hasRoomSong])
+    if (hasRoomSong && !standby) ov.player.toggle()
+  }, [hasRoomSong, standby])
 
   useEffect(() => ov.onTogglePlay(() => {
-    if (hasRoomSong) ov.player.toggle()
-    else setLocalPlaying((p) => !p)
-  }), [hasRoomSong])
+    if (hasRoomSong && !standby) ov.player.toggle()
+  }), [hasRoomSong, standby])
 
   // 滑鼠穿透
   useEffect(() => {
@@ -358,19 +460,30 @@ export default function App() {
     : { display: 'none' }
 
   // 專輯封面當底：玻璃會真的模糊/折射它（真玻璃、不卡）
-  const coverUrl = cfg.backdrop === 'cover' ? (roomState?.song?.cover || '') : ''
+  // 待機時沒有歌曲封面，就用璃音自己的封面，藥丸才不會空著。
+  const usableSongCover = roomState?.song?.cover && !failedArtworkUrls.has(roomState.song.cover)
+    ? roomState.song.cover
+    : ''
+  const usableArtistImage = [roomState?.song?.artistImageUrl, roomState?.song?.avatar, usableSongCover]
+    .find((url) => url && !failedArtworkUrls.has(url)) || ''
+  const coverUrl = cfg.backdrop === 'cover'
+    ? (standby ? LUCENT_COVER_ASSET : (usableSongCover || LUCENT_COVER_ASSET))
+    : ''
   const liveVisual = useMemo(() => ({
-    line: curLine,
-    trans: curTrans,
-    reserveTrans: songHasTrans,
-    lineKey: lineIdentity,
-    useMirror,
-    songName: hasRoomSong ? [roomState.song.name, roomState.song.artist].filter(Boolean).join(' — ') : '',
+    line: standby ? idlePresentation.line : curLine,
+    trans: standby ? '' : curTrans,
+    reserveTrans: standby ? false : songHasTrans,
+    lineKey: standby ? `idle:${idlePresentation.state}` : lineIdentity,
+    useMirror: standby ? false : useMirror,
+    songName: standby ? idlePresentation.songName : [roomState.song.name, roomState.song.artist].filter(Boolean).join(' · '),
     coverUrl,
-    avatarUrl: roomState?.song?.avatar || '',
-    showProgress: hasRoomSong && songDurSec > 0,
-    playing: hasRoomSong ? roomPlaying : localPlaying,
-  }), [curLine, curTrans, songHasTrans, lineIdentity, useMirror, hasRoomSong, roomState?.song?.name, roomState?.song?.artist, roomState?.song?.avatar, coverUrl, songDurSec, roomPlaying, localPlaying])
+    songCoverUrl: standby ? '' : usableSongCover,
+    avatarUrl: standby ? LUCENT_AVATAR_ASSET : (usableArtistImage || LUCENT_AVATAR_ASSET),
+    showProgress: !standby && hasRoomSong && songDurSec > 0,
+    playing: !standby && hasRoomSong ? roomPlaying : false,
+  }), [standby, idlePresentation, curLine, curTrans, songHasTrans, lineIdentity, useMirror, hasRoomSong, roomState?.song?.name, roomState?.song?.artist, usableSongCover, usableArtistImage, coverUrl, songDurSec, roomPlaying, localPlaying])
+  // 新歌在 loading 期間仍沿用既有過場的穩定畫面；不能因為暫時沒有歌詞／封面
+  // 就直接切到待機藥丸，否則會先閃成另一個尺寸，接著才跳回新歌。
   const transitionVisual = visualForSongTransition(
     pendingSongChange && cfg.songTransitionMode !== 'none' ? 'collapse' : songTransition.phase,
     frozenVisual || (pendingSongChange ? stableVisualRef.current : null),
@@ -393,6 +506,7 @@ export default function App() {
           className={`song-transition-wrap transition-${cfg.songTransitionMode || 'collapse'} phase-${songTransition.phase}${songTransition.phase === 'collapse' ? ' transition-run' : ''}`}
         >
         <Capsule
+          consoleCollapsed={consoleCollapsed}
           innerRef={capsuleRef}
           mouseContainer={containerRef}
           line={transitionVisual.line}
@@ -406,11 +520,18 @@ export default function App() {
           cfg={cfg}
           glass={glass}
           coverUrl={transitionVisual.coverUrl}
+          songCoverUrl={transitionVisual.songCoverUrl}
           avatarUrl={transitionVisual.avatarUrl}
           progressRef={progressRef}
           karaokeRef={karaokeRef}
           lyricFillRef={lyricFillRef}
+          lyricFillActiveRef={lyricFillActiveRef}
+          audioSpectrumRef={audioSpectrumRef}
+          spectrumActive={spectrumActive}
           showProgress={transitionVisual.showProgress}
+          // 只有真的沒有歌曲時才顯示待機唱片；換歌載入中要保留過場畫面的結構，
+          // 避免唱片忽然出現／消失而觸發尺寸重算。
+          forceVinyl={!hasRoomSong}
           transitionPhase={songTransition.phase}
           transitionRevision={songTransition.revision}
           effectsPaused={transitionEffectsPaused}

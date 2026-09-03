@@ -13,9 +13,8 @@ test('滑鼠穿透開啟後整個藥丸都不攔截遊戲操作', () => {
 })
 
 test('設定頁清楚說明穿透狀態與解除快捷鍵', () => {
-  assert.match(consoleSource, /滑鼠穿透（不攔截滑鼠）/)
-  assert.match(consoleSource, /遊戲與後方程式會直接收到滑鼠操作/)
-  assert.match(consoleSource, /已開啟：藥丸不會接收點擊/)
-  assert.match(consoleSource, /Ctrl\+Alt\+L/)
+  assert.match(consoleSource, /t\('ui\.look\.window\.clickThrough'\)/)
+  assert.match(consoleSource, /t\('ui\.look\.window\.clickThroughHint'\)/)
+  assert.match(consoleSource, /t\('ui\.look\.window\.clickThroughTip'\)/)
   assert.match(mainSource, /CommandOrControl\+Alt\+L/)
 })

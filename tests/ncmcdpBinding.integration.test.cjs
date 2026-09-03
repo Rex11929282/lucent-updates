@@ -1,8 +1,12 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const http = require('node:http')
+const fs = require('node:fs')
+const path = require('node:path')
 const { WebSocketServer } = require('ws')
 const ncmcdp = require('../electron/ncmcdp.cjs')
+const { selectLyricCandidate, buildLyricSnapshot, effectiveLyricAlpha } = require('../shared/lyricMirror.cjs')
+const { selectProgressInput, selectPlaybackProgress } = require('../shared/progressInput.cjs')
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -11,6 +15,44 @@ function listen(server) {
 function close(server) {
   return new Promise((resolve) => server.close(resolve))
 }
+
+test('the lyric reader survives a failed native playback-event registration', () => {
+  const hook = ncmcdp.buildHook()
+  const pageWindow = { fetch: () => Promise.resolve() }
+  const document = {
+    body: {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  }
+  class MutationObserver {
+    disconnect() {}
+    observe() {}
+  }
+  const XMLHttpRequest = { prototype: { open() {} } }
+  const performance = { getEntriesByType: () => [] }
+  const legacyNativeCmder = {
+    appendRegisterCall() {
+      throw new Error('native bridge is temporarily unavailable')
+    },
+  }
+
+  assert.doesNotThrow(() => Function(
+    'window', 'legacyNativeCmder', 'document', 'MutationObserver', 'getComputedStyle', 'XMLHttpRequest', 'performance',
+    hook,
+  )(pageWindow, legacyNativeCmder, document, MutationObserver, () => ({ color: '', opacity: '1' }), XMLHttpRequest, performance))
+  assert.equal(typeof pageWindow.__lglReadLyric, 'function')
+  assert.equal(typeof pageWindow.__lglEnsureLyricObserver, 'function')
+})
+
+test('the live NetEase CDP hook compiles before it is sent to the page', () => {
+  const hook = ncmcdp.buildHook()
+  assert.doesNotThrow(() => Function('window', 'legacyNativeCmder', 'return ' + hook))
+})
+
+test('the immediate playback-state repair installs a fresh NetEase hook revision', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'electron', 'ncmcdp.cjs'), 'utf8')
+  assert.match(source, /__lglHookedV6/)
+})
 
 test('a Runtime.bindingCalled lyric reaches the CDP update callback before any polling response', async () => {
   let port = 0

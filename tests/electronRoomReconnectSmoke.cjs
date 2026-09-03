@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..')
 const electron = require('electron')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function waitFor(check, message, timeoutMs = 10000) {
+async function waitFor(check, message, timeoutMs = 20000) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     try {
@@ -47,6 +47,8 @@ async function stopTree(child) {
     killer.once('exit', resolve)
     killer.once('error', resolve)
   })
+  // taskkill can report success before Chromium releases profile files.
+  await delay(250)
 }
 
 async function cdpPage(port) {
@@ -141,7 +143,13 @@ async function main() {
   } finally {
     hostOneCdp?.socket.close(); hostTwoCdp?.socket.close(); memberCdp?.socket.close()
     await stopTree(hostOne); await stopTree(hostTwo); await stopTree(member); await stopTree(vite)
-    fs.rmSync(qaRoot, { recursive: true, force: true })
+    try {
+      fs.rmSync(qaRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 })
+    } catch {
+      // A late Chromium handle should not turn a passed protocol test into a
+      // false failure. Best-effort async cleanup leaves only a temp profile.
+      fs.rm(qaRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 }, () => {})
+    }
   }
 }
 

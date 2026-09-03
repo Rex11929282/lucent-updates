@@ -29,6 +29,7 @@ function reduceInternalPlayer(state = createInternalPlayerState(), event = {}) {
       ? {
           ...event.song,
           cover: '',
+          artistImageUrl: '',
           avatar: '',
           loading: true,
           artworkReady: false,
@@ -62,9 +63,22 @@ function reduceInternalPlayer(state = createInternalPlayerState(), event = {}) {
   }
 
   if (event.type === 'playing') {
-    const canRebuild = Number(state.transition?.token) > 0
+    // Announce "this song is ready to draw" whenever a loaded track starts.
+    //
+    // This used to also require `transition.token > 0`, meaning the internal
+    // player would only announce readiness if *it* had finished a song earlier.
+    // But the capsule's shatter effect is usually mid-flight because the
+    // DESKTOP source ended a song, and that token lives on a separate object the
+    // internal player cannot see. So the first track played after desktop
+    // playback never got its signal: the capsule stayed frozen on the previous
+    // desktop song, showing its title and its lyrics, while this player was
+    // audibly playing something else.
+    //
+    // Announcing unconditionally is safe. The renderer only acts on it while a
+    // rebuild is actually pending, and it independently requires the artwork and
+    // the lyrics for this revision before it redraws.
+    const canRebuild = state.assetsReady
       && Number(state.transition?.endedSongRevision) !== Number(state.revision)
-      && state.assetsReady
     return {
       ...state,
       playing: true,
@@ -113,9 +127,18 @@ function reduceInternalPlayer(state = createInternalPlayerState(), event = {}) {
     }
   }
 
+  if (event.type === 'artwork') {
+    const artistImageUrl = String(event.artistImageUrl || event.avatar || state.song?.artistImageUrl || '')
+    return {
+      ...state,
+      song: state.song ? { ...state.song, artistImageUrl, avatar: artistImageUrl } : null,
+    }
+  }
+
   if (event.type === 'error') {
     return {
       ...state,
+      song: state.song?.loading ? null : state.song,
       playing: false,
       loading: false,
       error: String(event.message || '歌曲目前無法播放').slice(0, 160),

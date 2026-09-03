@@ -30,10 +30,10 @@ test('only the installable NSIS target is published and updater dependency is ex
 })
 
 test('Traditional Chinese update UI explains automatic safe installer behavior', () => {
-  assert.match(ui, /自動檢查更新/)
-  assert.match(ui, /穩定版/)
-  assert.match(ui, /測試版/)
-  assert.match(ui, /安裝並重新啟動/)
+  assert.match(ui, /t\('ui\.update\.autoCheck'\)/)
+  assert.match(ui, /t\('ui\.update\.stable'\)/)
+  assert.match(ui, /t\('ui\.update\.beta'\)/)
+  assert.match(ui, /t\('ui\.update\.install'\)/)
   assert.doesNotMatch(ui, /Portable/)
 })
 
@@ -47,6 +47,5 @@ test('main rechecks a downloaded update when playback or room authority changes'
 })
 
 test('update UI explains background download and safe automatic install', () => {
-  assert.match(ui, /背景自動下載/)
-  assert.match(ui, /安全時機自動安裝/)
+  assert.match(ui, /t\('ui\.update\.autoInstallHint'\)/)
 })

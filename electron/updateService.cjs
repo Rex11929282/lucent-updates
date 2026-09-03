@@ -5,9 +5,31 @@ function updateCapability({ isPackaged, isPortable, enabled, reason = '' }) {
   return { mode: 'automatic', reason: '', feedUrl: '' }
 }
 
+// Update errors are shown in the UI, and the issue templates ask people to
+// paste them into public GitHub issues. Windows puts the account name in almost
+// every path (C:\Users\<name>\...), so any path has to be redacted before the
+// text is displayed.
+//
+// The earlier version matched only `X:\` paths. electron-updater also reports
+// `file:///C:/Users/<name>/...` URLs and forward-slash paths, so the account
+// name still reached the screen through those.
+const REDACTED_PATH = '本機檔案'
 function publicError(error) {
   return String(error?.message || error || '更新失敗')
-    .replace(/[A-Za-z]:\\[^\r\n]+/g, '本機檔案')
+    // file:// URLs first — they contain a drive path that the later rules would
+    // otherwise only partly rewrite.
+    .replace(/file:\/{2,3}[^\s'"]+/gi, REDACTED_PATH)
+    // UNC shares and Windows extended-length prefixes (\\?\C:\...).
+    .replace(/\\{2}[^\s'"]+/g, REDACTED_PATH)
+    // Drive-letter paths with either separator. Stop at whitespace or a quote
+    // so the rest of the message survives instead of the line being eaten.
+    //
+    // The lookbehind matters: without it, `[A-Za-z]:[\\/]` also matches the
+    // "s:/" inside "https://github.com/...", turning every URL in an update
+    // error into "http本機檔案" and destroying the one detail a maintainer
+    // needs. A drive letter is a SINGLE letter, so anything alphanumeric
+    // immediately before it means this is not a drive path.
+    .replace(/(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s'"]*/g, REDACTED_PATH)
     .slice(0, 300)
 }
 
@@ -93,7 +115,9 @@ function createUpdateService({
       state.channel = settings.channel === 'beta' ? 'beta' : 'stable'
       if (capability.mode !== 'automatic') { publish(); return }
       autoUpdater.autoDownload = true
-      autoUpdater.autoInstallOnAppQuit = true
+      // Never let a leftover updater cache launch when the user simply closes
+      // Lucent. Verified updates still install via installIfSafe().
+      autoUpdater.autoInstallOnAppQuit = false
       autoUpdater.channel = state.channel === 'beta' ? 'beta' : 'latest'
       for (const [event, handler] of Object.entries(listeners)) autoUpdater.on(event, handler)
       if (settings.autoCheck !== false) {
@@ -122,4 +146,4 @@ function createUpdateService({
   }
 }
 
-module.exports = { createUpdateService, updateCapability }
+module.exports = { createUpdateService, updateCapability, publicError }

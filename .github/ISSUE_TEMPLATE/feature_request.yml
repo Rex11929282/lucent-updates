@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest something Lucent should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check [ROADMAP.md](../blob/main/ROADMAP.md) first. Some items are already planned,
+        and a few — macOS/Linux support, audio streaming between room members — are deliberately
+        out of scope with reasons given.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the situation, not only the feature. Knowing the underlying problem often leads to a
+        better solution than the one first imagined.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Lucent to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Including any workaround you currently use.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      options:
+        - Lyrics and synchronization
+        - Player detection and compatibility
+        - Overlay appearance
+        - Control console
+        - Rooms and sync between people
+        - Localization
+        - Packaging and updates
+        - Other
+    validations:
+      required: true

@@ -1,0 +1,85 @@
+name: Bug report
+description: Something in Lucent is broken or behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check *Known limitations* in the README. Windows-only support,
+        NetEase precise sync requiring the desktop app, and subtle glass refraction are documented
+        behaviour rather than bugs.
+
+  - type: input
+    id: version
+    attributes:
+      label: Lucent version
+      placeholder: "1.0.3"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Settings → System → About → Windows specifications
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: true
+
+  - type: input
+    id: player
+    attributes:
+      label: Music player and version
+      description: Which app was playing when this happened
+      placeholder: "NetEase Cloud Music 3.0.0 / Spotify 1.2.x / YouTube Music in Edge"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps someone else can follow exactly
+      placeholder: |
+        1. Start Spotify and play a track
+        2. Open Lucent
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error messages
+      description: Any error shown in the console, or relevant lines from the log file.
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Attach a screenshot for anything visual — layout, overlay rendering, or wrong text.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest released version
+          required: true
+        - label: I searched existing issues for a duplicate
+          required: true

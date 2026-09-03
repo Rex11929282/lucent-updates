@@ -79,6 +79,27 @@ async function main() {
 
   const overlay = await connect(overlayPage)
   try {
+    await overlay.evaluate(`window.overlay.stateSet({ cfg: {
+      oceanWave: true, oceanWaveColor: '#45b9ff', oceanWaveOpacity: 0.32,
+      oceanWaveAmplitude: 0.45, oceanWaveSpeed: 1,
+    } })`)
+    await waitFor(
+      () => overlay.evaluate(`(() => {
+        const wave = document.querySelector('.ocean-wave')
+        const clip = document.querySelector('.visualclip')
+        if (!wave || !clip) return null
+        const a = wave.getBoundingClientRect(), b = clip.getBoundingClientRect()
+        return Math.abs(a.left - b.left) < .5 && Math.abs(a.right - b.right) < .5
+      })()`),
+      'Ocean material did not mount inside the pill clip',
+    )
+    await overlay.evaluate(`(() => {
+      window.__lucentSpectrumFrames = []
+      window.__lucentStopSpectrum?.()
+      window.__lucentStopSpectrum = window.overlay.player.onSpectrum((frame) => {
+        window.__lucentSpectrumFrames.push(frame)
+      })
+    })()`)
     const loaded = await overlay.evaluate(`window.overlay.player.qaLoad(${JSON.stringify(wavDataUrl())})`)
     assert.equal(loaded.ok, true)
 
@@ -88,6 +109,24 @@ async function main() {
     )
     assert.equal(playing.song.id, 'runtime-qa')
     assert.ok(playing.durationMs > 0)
+
+    const spectrum = await waitFor(
+      () => overlay.evaluate(`window.__lucentSpectrumFrames.find((frame) => frame?.active && Array.isArray(frame.bands) && frame.bands.some((value) => value > 0))`),
+      'Audio service did not publish a real analyser spectrum frame',
+    )
+    assert.ok(spectrum.bands.length > 0)
+
+    const ocean = await waitFor(
+      () => overlay.evaluate(`(() => {
+        const wave = document.querySelector('.ocean-wave')
+        const level = Number(wave?.style.getPropertyValue('--ocean-level'))
+        if (!wave || !(level > 0)) return null
+        return { level, playState: wave.classList.contains('ocean-wave--live') ? 'running' : 'paused' }
+      })()`),
+      'Ocean material did not advance from the real playback ratio',
+    )
+    assert.ok(ocean.level > 0 && ocean.level <= 1)
+    assert.equal(ocean.playState, 'running')
 
     await overlay.evaluate('window.overlay.openConsole()')
     await waitFor(
@@ -110,8 +149,11 @@ async function main() {
     )
     assert.ok(paused.positionMs >= 400)
     assert.equal(Object.prototype.hasOwnProperty.call(paused, 'url'), false)
-    process.stdout.write(`${JSON.stringify({ playing, paused, audioServiceSurvivedConsoleClose: true }, null, 2)}\n`)
+    const oceanPaused = await overlay.evaluate(`document.querySelector('.ocean-wave')?.classList.contains('ocean-wave--live') ? 'running' : 'paused'`)
+    assert.equal(oceanPaused, 'paused')
+    process.stdout.write(`${JSON.stringify({ playing, paused, spectrum, ocean, audioServiceSurvivedConsoleClose: true }, null, 2)}\n`)
   } finally {
+    await overlay.evaluate('window.__lucentStopSpectrum?.()').catch(() => {})
     overlay.socket.close()
   }
 }

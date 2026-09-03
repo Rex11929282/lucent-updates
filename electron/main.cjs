@@ -1,44 +1,67 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Menu, desktopCapturer, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Menu, Tray, desktopCapturer, safeStorage } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const { execFile } = require('child_process')
-const { Room, getLanIp } = require('./room.cjs')
+const { Room, getLanIp, listLanIps } = require('./room.cjs')
 const { createMusicProvider } = require('./musicProvider.cjs')
 const smtc = require('./smtc.cjs')
 const ncmcdp = require('./ncmcdp.cjs')
 const { migrateState } = require('../shared/stateMigration.cjs')
+const { loadConfigFile } = require('../shared/configStore.cjs')
+const { isOwnMediaSession } = require('../shared/mediaSession.cjs')
 const { sharedAppearanceStyle } = require('../shared/roomStyle.cjs')
 const { canSendStyleOffer, createStyleOffer, handleStyleOfferOnce, applyAcceptedStyleOffer } = require('../shared/styleOffer.cjs')
 const { randomUUID } = require('crypto')
 const {
   createSongRevision,
+  canTrustCdpSongIdentity,
   isFreshMirrorSnapshot,
-  mirrorBelongsToSong,
+  mirrorSyncDisposition,
+  playbackStateToPlaying,
+  resolveCdpPlaying,
+  shouldProcessMirrorSnapshot,
   songIdentityKey,
 } = require('../shared/songSwitch.cjs')
+const { shouldHideWindowOnClose, resolveConsoleCloseAction } = require('../shared/windowLifecycle.cjs')
 const { isNaturalSongEnd, isReadyToRebuild } = require('../shared/songLifecycle.cjs')
 const { SOURCE, createPlaybackCoordinator } = require('../shared/playbackCoordinator.cjs')
+const { desktopSessionIdentity, desktopSourceId, isDesktopSource } = require('../shared/playbackSource.cjs')
+const { selectBestTrackMatch, shouldResolveLyrics } = require('../shared/trackMatching.cjs')
+const { sameTrackIdentity } = require('../shared/trackIdentity.cjs')
+const { desktopSourceDisposition } = require('../shared/desktopSourceLiveness.cjs')
+const { smtcClockDecision } = require('../shared/smtcClock.cjs')
 const { createInternalPlayerState, reduceInternalPlayer, internalSnapshot } = require('../shared/internalPlayerState.cjs')
 const { internalPlaybackEnabled, playerControlDecision, shouldPauseInternalForDesktop } = require('../shared/playerPolicy.cjs')
+const { PLAYER_ERROR_CODES, createPlayerError, playerErrorCode } = require('../shared/playerErrors.cjs')
 const { createCredentialStore } = require('./credentialStore.cjs')
 const { createLocalPlaylistStore } = require('./localPlaylistStore.cjs')
 const { createPrivacyService } = require('./privacyService.cjs')
 const { canExecuteRoomCommand, createRequestLimiter, normalizeCapabilities } = require('../shared/roomPolicy.cjs')
 const { createUpdateService, updateCapability } = require('./updateService.cjs')
 const { readBundledUpdateConfig } = require('../shared/updateConfig.cjs')
+const { createActiveSessionResolver } = require('../shared/activeSessionResolver.cjs')
+const { nativeUiLabels, resolveNativeLocale, SUPPORTED_NATIVE_LOCALES } = require('../shared/nativeUiLocale.cjs')
+const { preferredUiLocale } = require('../shared/systemLocale.cjs')
 const packagePolicy = require('../package.json').lucent || {}
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
-if (!app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1') {
+const RUNTIME_QA = !app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1'
+if (RUNTIME_QA) {
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 }
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let overlay = null
 let consoleWin = null
+let consoleOverlayTimer = null
 let audioServiceWin = null
+let audioServiceReady = false
+const pendingPlayerCommands = []
+let tray = null
+let explicitQuit = false
 const room = new Room()
 const playback = createPlaybackCoordinator()
+const activeSessionResolver = createActiveSessionResolver()
 const allowUnofficialNetease = packagePolicy.nonCommercialDevelopment === true
   || process.env.LUCENT_ALLOW_UNOFFICIAL_NETEASE === '1'
 const unofficialPlaybackAllowed = internalPlaybackEnabled({
@@ -91,20 +114,57 @@ function migrate(raw) {
   return migrateState(raw, SCHEMA)
 }
 
+// 設定檔讀不起來時，絕對不能安靜地把使用者的設定換成預設值就算了。
+// 原本這裡是 catch {} 直接回預設：只要寫檔寫到一半斷電、檔案被截斷、或內容
+// 變成不合法的 JSON，使用者所有的具名配置、外觀、房間設定就在下次啟動時
+// 無聲消失，而且原始檔案已經被下一次存檔覆蓋掉，救不回來。
+// 現在改成先把讀不懂的檔案改名保存，再退回預設，至少資料還在硬碟上。
 function loadState() {
-  try {
-    return migrate(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')))
-  } catch {
-    return createDefaultState()
+  const result = loadConfigFile({
+    fs,
+    configPath: CONFIG_PATH,
+    migrate,
+    createDefault: createDefaultState,
+    stamp: new Date().toISOString(),
+  })
+  if (result.outcome === 'recovered') {
+    console.error(
+      `[lucent] settings file could not be read (${result.error}). `
+      + (result.backupPath
+        ? `The original was kept at ${result.backupPath}.`
+        : 'The original could not be preserved.')
+      + ' Starting from defaults.',
+    )
   }
+  return result.state
 }
 function createDefaultState() {
   return { ...JSON.parse(JSON.stringify(DEFAULT_STATE)), win: null, schemaVersion: SCHEMA_VERSION }
 }
+// 設定寫檔。
+//
+// 為什麼需要 flush：原本只有 400ms 的 debounce，沒有任何離開前的強制寫入。
+// 只要在變更後 400 毫秒內關掉程式（或行程被強制結束），那次變更就無聲消失 ——
+// 使用者剛按下「儲存目前外觀」建立的配置就是這樣整組不見的。
+// 現在分兩條路：高頻變動（拖曳視窗、滑桿）維持 debounce，
+// 重要且不可重建的資料（具名配置）立即落地，離開前再保險 flush 一次。
 let saveTimer = null
-function saveState() {
+function writeStateNow() {
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(state, null, 2)) } catch {} }, 400)
+  saveTimer = null
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(state, null, 2))
+    return true
+  } catch { return false }
+}
+function saveState({ immediate = false } = {}) {
+  if (immediate) { writeStateNow(); return }
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(writeStateNow, 400)
+}
+// 還有沒寫出去的變更就趕在關閉前寫掉
+function flushState() {
+  if (saveTimer) writeStateNow()
 }
 function applyPatch(patch) {
   for (const k of Object.keys(patch)) {
@@ -231,6 +291,83 @@ function enforceBounds() {
   if (p.x !== b.x || p.y !== b.y) overlay.setPosition(p.x, p.y)
 }
 
+function showLucent() {
+  clearTimeout(consoleOverlayTimer)
+  if (!overlay || overlay.isDestroyed()) {
+    createOverlay()
+    return
+  }
+  if (overlay.isMinimized()) overlay.restore()
+  overlay.show()
+  overlay.focus()
+  // 系統匣恢復不能只顯示原生視窗；設定開啟時 Renderer 也會收起藥丸。
+  overlay.webContents.send('overlay:console-visibility', false)
+  enforceBounds()
+}
+
+function hideLucent() {
+  if (consoleWin && !consoleWin.isDestroyed()) consoleWin.hide()
+  if (overlay && !overlay.isDestroyed()) overlay.hide()
+}
+
+// Language subtags the app ships translations for, e.g. 'zh' from 'zh-TW'.
+const SUPPORTED_UI_LANGUAGES = new Set(
+  SUPPORTED_NATIVE_LOCALES.map((tag) => String(tag).split('-')[0].toLowerCase()),
+)
+const isSupportedUiLanguage = (tag) => SUPPORTED_UI_LANGUAGES.has(String(tag).split('-')[0].toLowerCase())
+
+// The display-language list, not app.getLocale() — see shared/systemLocale.cjs.
+function systemUiLocale() {
+  const preferred = typeof app.getPreferredSystemLanguages === 'function'
+    ? app.getPreferredSystemLanguages()
+    : []
+  return preferredUiLocale(preferred, app.getLocale(), isSupportedUiLanguage)
+}
+
+// Handed to every renderer so the window UI resolves 'auto' from the same
+// display-language list the native menus use. navigator.language cannot be used
+// for this: Chromium reports the region format there instead.
+const SYSTEM_LOCALE_ARGUMENT = '--lucent-system-locale='
+function rendererArguments() {
+  return [`${SYSTEM_LOCALE_ARGUMENT}${systemUiLocale()}`]
+}
+
+function nativeMenuTemplate() {
+  const labels = nativeUiLabels(state.ui?.locale, systemUiLocale())
+  return [
+    { label: labels.openConsole, click: openConsole },
+    { label: labels.showLucent, click: showLucent },
+    { label: labels.hideLucent, click: hideLucent },
+    { type: 'separator' },
+    { label: labels.quit, click: requestFinalQuit },
+  ]
+}
+
+function refreshTrayMenu() {
+  if (tray && !tray.isDestroyed()) tray.setContextMenu(Menu.buildFromTemplate(nativeMenuTemplate()))
+}
+
+function requestFinalQuit() {
+  explicitQuit = true
+  flushState()
+  app.quit()
+}
+
+// 不管是從哪條路離開（托盤、關閉視窗、系統登出、autoUpdater 重啟），
+// 都保證沒寫出去的設定會落地。
+app.on('before-quit', flushState)
+app.on('will-quit', flushState)
+app.on('window-all-closed', flushState)
+
+function createTray() {
+  if (tray) return tray
+  tray = new Tray(path.join(__dirname, '..', 'build', 'icon.ico'))
+  tray.setToolTip('璃音 Lucent')
+  refreshTrayMenu()
+  tray.on('click', showLucent)
+  return tray
+}
+
 function createOverlay() {
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize
   const W = 460, H = 96
@@ -247,7 +384,7 @@ function createOverlay() {
     fullscreenable: false, minWidth: 60, minHeight: 36,
     title: '璃音 Lucent',
     icon: path.join(__dirname, '..', 'build', 'icon.ico'),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, additionalArguments: rendererArguments() },
   })
   // 啟動時驗證上次保存的位置是否仍然合法（換解析度/拔螢幕/DPI 改變後可能已不存在）
   enforceBounds()
@@ -263,24 +400,97 @@ function createOverlay() {
       if (overlay && !overlay.isDestroyed()) { const b = overlay.getBounds(); state.win = { x: b.x, y: b.y }; saveState() }
     }, 400)
   })
+  overlay.on('close', (event) => {
+    if (!shouldHideWindowOnClose(explicitQuit)) return
+    event.preventDefault()
+    overlay.hide()
+  })
   overlay.on('closed', () => { overlay = null })
 }
 
+function setOverlayConsoleCollapsed(collapsed) {
+  clearTimeout(consoleOverlayTimer)
+  if (!overlay || overlay.isDestroyed()) return
+  if (!collapsed) {
+    overlay.showInactive()
+    overlay.webContents.send('overlay:console-visibility', false)
+    return
+  }
+  overlay.webContents.send('overlay:console-visibility', true)
+  consoleOverlayTimer = setTimeout(() => {
+    if (consoleWin && !consoleWin.isDestroyed() && overlay && !overlay.isDestroyed()) overlay.hide()
+  }, 170)
+}
+
+function saveConsolePreferences(patch = {}) {
+  state.ui = {
+    ...state.ui,
+    console: { ...(state.ui?.console || {}), ...patch },
+  }
+  broadcastState()
+  saveState()
+}
+
+function performConsoleClose(action, remember = false) {
+  const resolved = resolveConsoleCloseAction(action, false)
+  if (remember && resolved !== 'ask') saveConsolePreferences({ closeBehavior: resolved })
+  if (resolved === 'ask') {
+    if (consoleWin && !consoleWin.isDestroyed()) consoleWin.webContents.send('console:close-request')
+    return { ok: true, action: 'ask' }
+  }
+  if (resolved === 'pill') {
+    if (consoleWin && !consoleWin.isDestroyed()) consoleWin.hide()
+    showLucent()
+    return { ok: true, action: 'pill' }
+  }
+  if (resolved === 'tray') {
+    hideLucent()
+    return { ok: true, action: 'tray' }
+  }
+  requestFinalQuit()
+  return { ok: true, action: 'quit' }
+}
+
+function requestConsoleClose() {
+  const action = resolveConsoleCloseAction(state.ui?.console?.closeBehavior, explicitQuit)
+  return performConsoleClose(action, false)
+}
+
 function openConsole() {
-  if (consoleWin && !consoleWin.isDestroyed()) { consoleWin.show(); consoleWin.focus(); return }
+  if (consoleWin && !consoleWin.isDestroyed()) {
+    consoleWin.show()
+    consoleWin.focus()
+    setOverlayConsoleCollapsed(true)
+    return
+  }
   consoleWin = new BrowserWindow({
-    width: 460, height: 700, frame: false, transparent: true, backgroundColor: '#00000000',
-    hasShadow: false, resizable: true, minWidth: 380, minHeight: 460, alwaysOnTop: true, fullscreenable: false,
+    width: 1080, height: 720, frame: false, transparent: true, backgroundColor: '#00000000',
+    hasShadow: false, show: false, resizable: true, minWidth: 860, minHeight: 600, alwaysOnTop: false, fullscreenable: false,
     title: '璃音 Lucent · 控制台',
     icon: path.join(__dirname, '..', 'build', 'icon.ico'),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, additionalArguments: rendererArguments() },
   })
   loadRoute(consoleWin, 'console')
-  consoleWin.on('closed', () => { consoleWin = null })
+  consoleWin.once('ready-to-show', () => {
+    if (!consoleWin || consoleWin.isDestroyed()) return
+    consoleWin.show()
+    consoleWin.focus()
+    setOverlayConsoleCollapsed(true)
+  })
+  consoleWin.on('close', (event) => {
+    if (explicitQuit) return
+    event.preventDefault()
+    requestConsoleClose()
+  })
+  consoleWin.on('closed', () => {
+    consoleWin = null
+    setOverlayConsoleCollapsed(false)
+  })
 }
 
 function createAudioService() {
   if (audioServiceWin && !audioServiceWin.isDestroyed()) return audioServiceWin
+  audioServiceReady = false
   audioServiceWin = new BrowserWindow({
     width: 1,
     height: 1,
@@ -293,15 +503,31 @@ function createAudioService() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      additionalArguments: rendererArguments(),
     },
   })
   loadRoute(audioServiceWin, 'audio-service')
-  audioServiceWin.on('closed', () => { audioServiceWin = null })
+  audioServiceWin.on('closed', () => { audioServiceReady = false; audioServiceWin = null; pendingPlayerCommands.length = 0 })
   return audioServiceWin
+}
+
+function flushPendingPlayerCommands() {
+  if (!audioServiceReady || !audioServiceWin || audioServiceWin.isDestroyed()) return
+  audioServiceWin.webContents.send('player:command', { type: 'volume', value: state.cfg.internalPlayerVolume })
+  while (pendingPlayerCommands.length && audioServiceWin && !audioServiceWin.isDestroyed()) {
+    audioServiceWin.webContents.send('player:command', pendingPlayerCommands.shift())
+  }
 }
 
 function sendPlayerCommand(command) {
   if (!audioServiceWin || audioServiceWin.isDestroyed()) return false
+  if (!audioServiceReady) {
+    // The hidden window can still be loading when the first search result is
+    // clicked. Queueing here prevents the load command from being lost before
+    // AudioService has subscribed to player:command.
+    pendingPlayerCommands.push(command)
+    return true
+  }
   audioServiceWin.webContents.send('player:command', command)
   return true
 }
@@ -338,10 +564,15 @@ function updateCapture() {
 }
 
 function popupOverlayMenu() {
+  const labels = nativeUiLabels(state.ui?.locale, systemUiLocale())
   const menu = Menu.buildFromTemplate([
-    { label: '控制台（房間 / 點歌 / 設定）', click: () => openConsole() },
     {
-      label: '鎖定位置（不能移動）',
+      label: labels.openConsole,
+      click: () => openConsole(),
+    },
+    { type: 'separator' },
+    {
+      label: labels.lockPosition,
       type: 'checkbox',
       checked: !!state.cfg.locked,
       click: () => { applyPatch({ cfg: { locked: !state.cfg.locked } }); broadcastState(); saveState() },
@@ -361,6 +592,7 @@ room.on('tick', (tick) => {
 })
 room.on('members', (m) => sendAll('room:members', m))
 room.on('status', (st) => sendAll('room:status', st))
+room.on('sync', (sync) => sendAll('room:status', { sync }))
 room.on('queue', (queue) => sendAll('room:queue', queue))
 room.on('capabilities', (capabilities) => sendAll('room:capabilities', capabilities))
 room.on('commandResult', (result) => sendAll('room:commandResult', result))
@@ -404,13 +636,16 @@ async function playRoomQueueEntry(queueEntryId) {
   return { ok: true }
 }
 
+// 回傳「有沒有真的接上下一首」，呼叫端才知道要不要改走內建播放器的佇列。
 async function advanceRoomQueue() {
-  if (room.mode !== 'host' || !activeRoomQueueEntryId || !localPlaylists) return
+  if (room.mode !== 'host' || !activeRoomQueueEntryId || !localPlaylists) return false
   try { localPlaylists.removeRoomQueueEntry(activeRoomQueueEntryId) } catch {}
   activeRoomQueueEntryId = null
   const next = activeRoomQueue().find((entry) => entry.status === 'queued')
   broadcastRoomQueue()
-  if (next) await playRoomQueueEntry(next.id)
+  if (!next) return false
+  await playRoomQueueEntry(next.id)
+  return true
 }
 
 async function handleRoomCommand(command, sender) {
@@ -517,11 +752,17 @@ function mergeTranslation(lines, transRaw) {
 
 const np = {
   title: '', artist: '', song: null, lines: [], timed: false, playPosMs: 0, playing: false, lastAt: 0,
+  syncStatus: 'waiting-identity',
   transition: { token: 0, endedSongRevision: 0, endedSongId: null, readySongRevision: 0 },
 }
 const songRevision = createSongRevision()
-let followApp = null // null = 自動找網易雲；否則跟隨指定來源 app
-let lastSmtcKey = ''
+let followApp = null // null = 自動判斷目前播放來源；否則跟隨指定來源 app
+let lastSmtcIdentity = null
+let lastDesktopDetectedAt = 0
+let activeSmtcSourceAppId = ''
+let activeSmtcSessionId = ''
+let activeDesktopPlaybackSource = SOURCE.DESKTOP_NETEASE
+let lastSmtcClockState = null
 // ---- 統一播放時鐘 ----
 // 來源可能是 SMTC（有明確 Playing/Paused + 位置）或 CDP（整數秒進度）。
 // 任一來源更新就重新對時；其餘時間用經過時間內插。
@@ -595,12 +836,15 @@ function pushState() {
   const snapshot = {
     song: np.song, lines: np.lines, timed: np.timed,
     positionMs: estPosMs(), playing: np.playing,
+    sourceAppId: activeSmtcSourceAppId,
+    sessionId: activeSmtcSessionId,
     mirror: np.mirror || null, // 鏡像自網易雲畫面的當前句（優先採用）
+    syncStatus: np.syncStatus,
     transition: np.transition,
     capturedAt: Date.now(),
   }
-  const selected = playback.update(SOURCE.DESKTOP, snapshot)
-  if (selected?.source === SOURCE.DESKTOP && shouldPauseInternalForDesktop({
+  const selected = playback.update(activeDesktopPlaybackSource, snapshot)
+  if (isDesktopSource(selected?.source) && shouldPauseInternalForDesktop({
     previousSource: previous?.source,
     desktopPlaying: snapshot.playing,
     internalPlaying: internalPlayer.playing,
@@ -612,8 +856,8 @@ function pushState() {
 function pushTick() {
   if (markNextSongReady()) pushState()
   const tick = { positionMs: estPosMs(), playing: np.playing }
-  const selected = playback.updateClock(SOURCE.DESKTOP, { ...tick, capturedAt: Date.now() })
-  if (selected?.source !== SOURCE.DESKTOP) return
+  const selected = playback.updateClock(activeDesktopPlaybackSource, { ...tick, capturedAt: Date.now() })
+  if (!isDesktopSource(selected?.source)) return
   if (room.mode === 'host') room.tick(tick)
   else if (room.mode !== 'member') sendAll('room:tick', tick)
 }
@@ -639,6 +883,55 @@ function cdpPosMs() {
 }
 function cdpPlaying() { return cdpSec >= 0 && Date.now() - cdpSecAt < 2500 }
 
+function clearDesktopSource() {
+  const selectedPlayback = playback.current()
+  // 啟動或加入房間時，仲裁器會先建立一個空的 desktop source。它不是
+  // 真正的播放狀態，不能在 liveness grace 到期時把主持人的房間快照清掉。
+  const hadDesktopState = !!np.song || !!np.mirror || !!clk.at
+    || (isDesktopSource(selectedPlayback?.source) && !!selectedPlayback.song)
+  if (!hadDesktopState) return false
+  np.title = ''
+  np.artist = ''
+  np.song = null
+  np.lines = []
+  np.timed = false
+  np.mirror = null
+  np.syncStatus = 'idle'
+  np.playPosMs = 0
+  np.playing = false
+  np.lastAt = 0
+  np.transition = { token: np.transition.token, endedSongRevision: 0, endedSongId: null, readySongRevision: 0 }
+  mirrorKey = ''
+  mirrorOrder = { capturedAt: 0, seq: 0 }
+  lastSmtcIdentity = null
+  cdpSec = -1
+  cdpSecAt = 0
+  cdpLastAt = 0
+  posIdx = -1
+  posPrev.vals = []
+  posPrev.at = 0
+  posLast.ms = -1
+  posLast.at = 0
+  lastSmtcClockState = null
+  clk.posMs = 0
+  clk.at = 0
+  clk.playing = false
+  clk.src = ''
+  const selected = playback.clearDesktop()
+  activeDesktopPlaybackSource = SOURCE.DESKTOP_NETEASE
+  activeSmtcSourceAppId = ''
+  activeSmtcSessionId = ''
+  if (room.mode === 'host') {
+    room.setState(selected || { song: null, lines: [], timed: false, positionMs: 0, playing: false, mirror: null, syncStatus: 'idle' })
+  }
+  return true
+}
+
+function expireDesktopSource(now = Date.now()) {
+  if (desktopSourceDisposition({ now, lastDetectedAt: lastDesktopDetectedAt }) !== 'clear') return false
+  return clearDesktopSource()
+}
+
 // 用「網易雲正在播的確切歌曲 ID」載入歌詞（優先 YRC 逐字）→ 每首歌都精準
 function resetSongRuntime(identity, ticket, playing) {
   const name = identity.name || identity.title || ''
@@ -646,6 +939,7 @@ function resetSongRuntime(identity, ticket, playing) {
   np.title = name
   np.artist = artist
   np.mirror = null
+  np.syncStatus = identity.preciseMirror === false ? 'timeline' : 'waiting-identity'
   mirrorKey = ''
   mirrorOrder = { capturedAt: 0, seq: 0 }
   np.lines = []
@@ -654,11 +948,13 @@ function resetSongRuntime(identity, ticket, playing) {
     id: identity.id || null,
     name: name || '載入中…',
     artist,
-    cover: '',
-    durationMs: 0,
-    avatar: '',
+    album: identity.album || '',
+    cover: identity.cover || '',
+    durationMs: identity.durationMs || 0,
+    artistImageUrl: identity.artistImageUrl || identity.avatar || '',
+    avatar: identity.artistImageUrl || identity.avatar || '',
     loading: true,
-    artworkReady: false,
+    artworkReady: !!(identity.avatar || identity.cover),
     revision: ticket.revision,
   }
 
@@ -669,6 +965,7 @@ function resetSongRuntime(identity, ticket, playing) {
   posPrev.at = 0
   posLast.ms = -1
   posLast.at = 0
+  lastSmtcClockState = null
   clk.at = 0
   clkSync(0, !!playing, 'song-change')
   pushState()
@@ -677,7 +974,7 @@ function resetSongRuntime(identity, ticket, playing) {
 function beginSong(identity, source, playing = np.playing) {
   const next = { ...identity, id: identity.id ? String(identity.id) : null, source }
   const current = songRevision.current()
-  if (current && current.key === songIdentityKey(next)) return current
+  if (current && sameTrackIdentity(current.identity, next)) return current
   const ticket = songRevision.begin(next)
   resetSongRuntime(next, ticket, playing)
   if (next.id) loadSongById(ticket).catch(() => {})
@@ -688,18 +985,23 @@ function beginSong(identity, source, playing = np.playing) {
 function promoteCurrentSong(id, source = 'cdp', metadata = {}) {
   const current = songRevision.current()
   if (!current || current.identity.id || !id) return null
-  const ticket = songRevision.promote(current, { ...metadata, id, source })
+  const providerMetadata = {
+    ...metadata,
+    name: current.identity.name || metadata.name,
+    artist: current.identity.artist || metadata.artist,
+  }
+  const ticket = songRevision.promote(current, { ...providerMetadata, id, source })
   if (!ticket) return null
 
-  np.title = metadata.name || np.title
-  np.artist = metadata.artist || np.artist
+  np.title = providerMetadata.name || np.title
+  np.artist = providerMetadata.artist || np.artist
   np.song = {
     ...np.song,
     id: ticket.identity.id,
-    name: metadata.name || np.song?.name || np.title,
-    artist: metadata.artist || np.song?.artist || np.artist,
+    name: providerMetadata.name || np.song?.name || np.title,
+    artist: providerMetadata.artist || np.song?.artist || np.artist,
     loading: true,
-    artworkReady: false,
+    artworkReady: !!(np.song?.avatar || np.song?.cover),
     revision: ticket.revision,
   }
   pushState()
@@ -714,13 +1016,19 @@ async function loadSongById(ticket) {
   if (!songRevision.isCurrent(ticket)) return
 
   if (detail) {
-    np.title = detail.name
-    np.artist = detail.artist
+    np.title = ticket.identity.name || detail.name
+    np.artist = ticket.identity.artist || detail.artist
     np.song = {
       ...detail,
-      avatar: '',
+      name: ticket.identity.name || detail.name,
+      artist: ticket.identity.artist || detail.artist,
+      album: ticket.identity.album || detail.album,
+      cover: ticket.identity.cover || detail.cover,
+      durationMs: ticket.identity.durationMs || detail.durationMs,
+      artistImageUrl: ticket.identity.artistImageUrl || ticket.identity.avatar || '',
+      avatar: ticket.identity.artistImageUrl || ticket.identity.avatar || '',
       loading: true,
-      artworkReady: false,
+      artworkReady: !!(ticket.identity.avatar || ticket.identity.cover),
       revision: ticket.revision,
     }
     pushState()
@@ -728,16 +1036,17 @@ async function loadSongById(ticket) {
 
   // 一般 LRC 是切歌恢復的必要資料；YRC 只是逐字效果的可選升級。
   // 不能讓 CDP 請求（最慢 6 秒）卡住新歌與破碎過場的回復。
-  const pair = await netease.getLyricPair(id).catch(() => ({ lrc: '', trans: '' }))
+  const pair = await netease.getLyricPair(id).catch(() => ({ yrc: '', lrc: '', trans: '' }))
   if (!songRevision.isCurrent(ticket)) return
 
-  const parsed = parseLrc(pair.lrc)
+  const wordTimed = parseYrc(pair.yrc)
+  const parsed = wordTimed.lines.length ? wordTimed : parseLrc(pair.lrc)
   np.lines = pair.trans ? mergeTranslation(parsed.lines, pair.trans) : parsed.lines
   np.timed = parsed.timed
-  const needsArtistAvatar = !!detail?.artistId
+  const needsArtistAvatar = !!detail?.artistId && !np.song?.artistImageUrl
   np.song = {
     ...np.song,
-    avatar: needsArtistAvatar ? np.song.avatar : (np.song.avatar || np.song.cover || ''),
+    avatar: np.song.artistImageUrl || '',
     loading: false,
     artworkReady: !needsArtistAvatar,
     revision: ticket.revision,
@@ -760,7 +1069,8 @@ async function loadSongById(ticket) {
     if (songRevision.isCurrent(ticket)) {
       np.song = {
         ...np.song,
-        avatar: avatar || np.song.cover || '',
+        artistImageUrl: avatar || '',
+        avatar: avatar || '',
         artworkReady: true,
       }
       pushState()
@@ -771,27 +1081,17 @@ async function loadSongById(ticket) {
 async function loadSongByMeta(ticket) {
   const { name, title, artist } = ticket.identity
   const wantedTitle = name || title || ''
+  if (!shouldResolveLyrics(ticket.identity)) {
+    if (!songRevision.isCurrent(ticket) || ticket.identity.id) return
+    np.song = { ...np.song, loading: false, artworkReady: true }
+    pushState()
+    return
+  }
   let results = []
   try { results = await netease.searchSongs(`${wantedTitle} ${artist || ''}`.trim(), 8) } catch {}
   if (!songRevision.isCurrent(ticket)) return
   if (ticket.identity.id) return
-
-  const norm = (value) => String(value || '')
-    .normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
-  const wantT = norm(wantedTitle)
-  const wantA = norm(artist)
-  let hit = null
-  let bestScore = -1
-  for (const result of results) {
-    const resultTitle = norm(result.name)
-    const resultArtist = norm(result.artist)
-    let score = 0
-    if (resultTitle === wantT) score += 4
-    else if (resultTitle.includes(wantT) || wantT.includes(resultTitle)) score += 2
-    if (wantA && (resultArtist.includes(wantA) || wantA.includes(resultArtist))) score += 3
-    if (score > bestScore) { bestScore = score; hit = result }
-  }
-  if (bestScore < 2) hit = results[0] || null
+  const hit = selectBestTrackMatch(ticket.identity, results)
   if (!hit) {
     np.song = { ...np.song, loading: false, artworkReady: true }
     pushState()
@@ -801,7 +1101,12 @@ async function loadSongByMeta(ticket) {
 }
 
 function onCdp(d) {
+  // 另一個 Windows 媒體來源正在使用時，背景中的網易雲 CDP 不得搶回歌曲與時鐘。
+  if (activeSmtcSourceAppId && !NETEASE_RE.test(activeSmtcSourceAppId)) return
   cdpLastAt = Date.now()
+  if (d?.songId != null || d?.lyric || Number.isFinite(Number(d?.progressSec))) {
+    lastDesktopDetectedAt = cdpLastAt
+  }
   if (room.mode === 'member') return
   if (d.songId != null) {
     const nextId = String(d.songId)
@@ -818,23 +1123,38 @@ function onCdp(d) {
   }
   // 鏡像網易雲畫面上正在高亮的那一句：它由網易雲自己決定，
   // 完全不需要時間軸計算，天生同步（同步問題的根本解）。
-  const activeSongId = songRevision.current()?.identity?.id
-  if (d.lyric && mirrorBelongsToSong(activeSongId, d.lyric.songId) && isFreshMirrorSnapshot(mirrorOrder, d.lyric)) {
-    mirrorOrder = { capturedAt: d.lyric.capturedAt, seq: d.lyric.seq }
-    const key = d.lyric.songId + '|' + d.lyric.i + '|' + d.lyric.main
-    if (key !== mirrorKey) {
-      mirrorKey = key
-      np.mirror = {
-        songId: String(d.lyric.songId),
-        i: d.lyric.i,
-        text: d.lyric.main || '',
-        trans: d.lyric.sub || '',
-        at: Date.now(),
+  if (shouldProcessMirrorSnapshot(d)) {
+    const activeSongId = songRevision.current()?.identity?.id
+    const mirrorDisposition = mirrorSyncDisposition({ activeSongId, lyric: d.lyric })
+    if (mirrorDisposition !== 'exact') {
+      if (np.mirror || np.syncStatus !== mirrorDisposition) {
+        np.mirror = null
+        np.syncStatus = mirrorDisposition
+        mirrorKey = ''
+        mirrorOrder = { capturedAt: 0, seq: 0 }
+        pushState()
       }
-      pushState()
+    } else if (isFreshMirrorSnapshot(mirrorOrder, d.lyric)) {
+      mirrorOrder = { capturedAt: d.lyric.capturedAt, seq: d.lyric.seq }
+      const key = d.lyric.songId + '|' + d.lyric.i + '|' + d.lyric.main
+      if (key !== mirrorKey || np.syncStatus !== 'exact') {
+        mirrorKey = key
+        np.syncStatus = 'exact'
+        np.mirror = {
+          songId: String(d.lyric.songId),
+          i: d.lyric.i,
+          text: d.lyric.main || '',
+          trans: d.lyric.sub || '',
+          at: Date.now(),
+        }
+        pushState()
+      }
     }
   }
-  if (Array.isArray(d.vals)) {
+  const directProgress = Number(d.progressSec)
+  const hasDirectProgress = Number.isFinite(directProgress) && directProgress >= 0
+  const positionVals = hasDirectProgress ? [directProgress] : d.vals
+  if (Array.isArray(positionVals)) {
     // 從網易雲進度條 input 取播放秒數：可能有多個 input（音量等），
     // 挑出「以約 1 倍速前進」的那個當作播放位置。
     const now = Date.now()
@@ -846,33 +1166,40 @@ function onCdp(d) {
         // 找出「以約 1 倍速前進」的 input 當作播放進度。
         // 音量等其他 input 不會自己往前跑，所以只要是持續遞增的就是它。
         let best = -1, bestScore = -1
-        for (let i = 0; i < d.vals.length; i++) {
+        for (let i = 0; i < positionVals.length; i++) {
           const prev = posPrev.vals[i]
           if (prev == null) continue
-          const rate = (d.vals[i] - prev) / dtSec
+          const rate = (positionVals[i] - prev) / dtSec
           if (rate > 0.25 && rate < 3.0) { // 放寬範圍，避免因取樣抖動鎖不上
             const score = 1 - Math.min(1, Math.abs(rate - 1))
             if (score > bestScore) { bestScore = score; best = i }
           }
         }
-        if (best >= 0) posIdx = best
-        posPrev.vals = d.vals.slice()
+        if (!hasDirectProgress && best >= 0) posIdx = best
+        posPrev.vals = positionVals.slice()
         posPrev.at = now
       }
     } else {
-      posPrev.vals = d.vals.slice()
+      posPrev.vals = positionVals.slice()
       posPrev.at = now
     }
-    if (posIdx >= 0 && d.vals[posIdx] != null) {
-      const posMs = Math.round(d.vals[posIdx] * 1000)
+    if (hasDirectProgress) posIdx = 0
+    if (posIdx >= 0 && positionVals[posIdx] != null) {
+      const posMs = Math.round(positionVals[posIdx] * 1000)
       // 進度值約每秒才更新一次。若每次輪詢都拿它對時，大部分時候是「舊值」，
       // 會讓時鐘被反覆往回拉 → 誤差來回震盪（實測 ±350ms）。
       // 因此只在「值真的變了」的那一刻對時（此時就是真實位置），其餘時間讓時鐘自走。
       const changed = Math.abs(posMs - posLast.ms) > 120
       if (changed) { posLast.ms = posMs; posLast.at = Date.now() }
-      const playing = Date.now() - posLast.at < 1500
+      const playing = resolveCdpPlaying({
+        playState: d.playState,
+        lastProgressAt: posLast.at,
+        now: Date.now(),
+      })
       cdpSec = Math.floor(posMs / 1000)
-      cdpSecAt = Date.now()
+      // 同一個 slider 值會在每次 CDP 輪詢重複回來；只有值真的變動時
+      // 才更新「最後收到播放進度」時間，否則暫停後永遠不會進入安全停格。
+      cdpSecAt = changed ? Date.now() : cdpSecAt
       if (changed || !clk.at || playing !== clk.playing) {
         // 健康度只在「新鮮讀數」時量測。舊值會讓時鐘看起來偏移，
         // 那是讀數過期造成的假象，不是真的不同步。
@@ -893,7 +1220,7 @@ function onCdp(d) {
           : clkPos() + err * 0.08
         clk.at = Date.now()
         clk.playing = playing
-        clk.src = 'slider'
+        clk.src = 'cdp'
         np.playing = playing
         np.playPosMs = posMs
         np.lastAt = clk.at
@@ -903,10 +1230,16 @@ function onCdp(d) {
       }
     }
   }
+  const explicitPlaying = playbackStateToPlaying(d.playState)
+  if (explicitPlaying !== null && explicitPlaying !== clk.playing) {
+    clkSync(clkPos(), explicitPlaying, 'cdp-state')
+    pushTick()
+  }
 }
 
 // 定時推送目前位置給畫面；並在來源都沉默太久時判定為暫停
 setInterval(() => {
+  expireDesktopSource()
   if (room.mode === 'member') return
   if (!clk.at) return
   // CDP 是播放中的主要心跳：超過 2.5 秒沒有新的秒 → 視為暫停（網易雲暫停時不回報）
@@ -918,62 +1251,147 @@ setInterval(() => {
 }, 250)
 
 const NETEASE_RE = /cloudmusic|netease|网易|網易/i
+const ownMediaSourceAppIds = new Set([
+  path.basename(process.execPath).toLowerCase(),
+  path.basename(process.execPath, path.extname(process.execPath)).toLowerCase(),
+  String(app.getName() || '').toLowerCase(),
+  'electron.exe',
+])
 async function onSmtc(data) {
-  const sessions = data.sessions || []
+  // The hidden internal <audio> element publishes its own Windows media
+  // session. It is not an external player and must never replace the
+  // internal-player source with an empty desktop snapshot.
+  const sessions = (data.sessions || []).filter((session) => !isOwnMediaSession(session, ownMediaSourceAppIds))
   const nzTitle = (data.netease || '').trim() // 網易雲桌面版視窗標題「歌 - 歌手」
 
-  const detected = sessions.map((s) => ({ app: s.app, title: s.title, status: s.status }))
+  const detected = sessions.map((s) => ({
+    app: s.sourceAppId,
+    sourceAppId: s.sourceAppId,
+    title: s.title,
+    status: s.playbackStatus,
+  }))
   if (nzTitle) detected.unshift({ app: '網易雲桌面版', title: nzTitle, status: '視窗標題' })
 
-  // 選來源：指定 > 自動找 SMTC 網易雲(有進度) > 網易雲桌面版視窗標題(從頭推進)
+  // 選來源：指定來源 > 真正活躍的 SMTC 工作階段 > 網易雲桌面版視窗標題退路。
   let cur = null, hasPos = false
-  if (followApp) {
-    const s = sessions.find((x) => x.app === followApp && x.title)
-    if (s) { cur = { title: s.title, artist: s.artist || '', pos: s.pos || 0, playing: s.status === 'Playing' }; hasPos = true }
-  } else {
-    const s = sessions.find((x) => NETEASE_RE.test(x.app || '') && x.title)
-    if (s) { cur = { title: s.title, artist: s.artist || '', pos: s.pos || 0, playing: s.status === 'Playing' }; hasPos = true }
-    else if (nzTitle) {
-      const p = nzTitle.split(' - ')
-      cur = { title: p[0].trim(), artist: p.slice(1).join(' - ').trim(), pos: 0, playing: true }
-      hasPos = false
+  const selectedSession = activeSessionResolver.resolve(sessions, { manualSourceAppId: followApp })
+  if (selectedSession) {
+    const identity = desktopSessionIdentity(selectedSession)
+    cur = {
+      ...identity,
+      title: identity.name,
+      position: selectedSession.position || 0,
+      duration: selectedSession.duration || 0,
+      playing: selectedSession.playbackStatus === 'Playing',
+      isNetease: identity.preciseMirror,
     }
+    hasPos = true
   }
+  // 視窗標題沒有播放狀態或進度，只能在完全沒有 SMTC 來源時使用；
+  // 不能覆蓋仲裁器保留下來的暫停歌曲，否則網易雲開著但沒播放也會誤切歌。
+  if (!followApp && nzTitle && !cur) {
+    const p = nzTitle.split(' - ')
+    cur = {
+      sourceAppId: '網易雲桌面版',
+      sessionId: 'netease-window-title',
+      title: p[0].trim(),
+      artist: p.slice(1).join(' - ').trim(),
+      position: 0,
+      duration: 0,
+      playing: true,
+      isNetease: true,
+    }
+    hasPos = false
+  }
+
+  const previousSmtcSourceAppId = activeSmtcSourceAppId
+  // A single GSMTC scan can temporarily omit the active application. Keep
+  // its identity during the existing liveness grace period so background
+  // NetEase CDP events cannot take over a Spotify/YouTube/generic source.
+  // clearDesktopSource() remains the only place that drops the identity once
+  // the grace period has actually expired.
+  if (cur) {
+    activeSmtcSourceAppId = cur.sourceAppId
+    activeSmtcSessionId = cur.sessionId || ''
+    activeDesktopPlaybackSource = cur.playbackSource || desktopSourceId(cur)
+  }
+  const activeSourceChanged = !!previousSmtcSourceAppId
+    && previousSmtcSourceAppId !== activeSmtcSourceAppId
 
   const cdpStatus = ncmcdp.getStatus()
   sendAll('np:info', {
     detected, following: followApp, matched: !!cur, cdp: cdpStatus.connected,
     lyricMirror: cdpStatus.directLyricEvents > 0,
     lyricMirrorLastAt: cdpStatus.lastDirectLyricAt,
-    posLocked: posIdx >= 0,
+    posLocked: cur ? (!cur.isNetease || posIdx >= 0) : false,
     health: (Date.now() - health.at < 4000)
       ? { driftMs: health.driftMs, avgMs: health.absAvg == null ? null : Math.round(health.absAvg) }
       : null,
-    current: cur ? { app: ncmcdp.isConnected() ? '網易雲(精準CDP)' : (hasPos ? 'SMTC' : '網易雲桌面版'), title: cur.title, artist: cur.artist, status: cur.playing ? 'Playing' : 'Paused' } : null,
+    current: cur ? { app: cur.isNetease && ncmcdp.isConnected() ? '網易雲(精準CDP)' : cur.sourceAppId, title: cur.title, artist: cur.artist, status: cur.playing ? 'Playing' : 'Paused' } : null,
   })
 
+  if (cur) lastDesktopDetectedAt = Date.now()
   if (room.mode === 'member') return
   if (!cur) return
 
-  const smtcKey = songIdentityKey({ name: cur.title, artist: cur.artist })
-  const smtcChanged = smtcKey !== lastSmtcKey
-  if (smtcChanged) lastSmtcKey = smtcKey
+  const smtcIdentity = {
+    name: cur.title,
+    artist: cur.artist,
+    album: cur.album,
+    durationMs: cur.durationMs,
+  }
+  const smtcChanged = !sameTrackIdentity(lastSmtcIdentity, smtcIdentity)
+  if (smtcChanged) lastSmtcIdentity = smtcIdentity
+  else {
+    // 同一首歌的 GSMTC 欄位可能分批補齊；只補身份資料，不重跑切歌／清空封面。
+    lastSmtcIdentity = {
+      ...lastSmtcIdentity,
+      album: smtcIdentity.album || lastSmtcIdentity.album,
+      durationMs: smtcIdentity.durationMs || lastSmtcIdentity.durationMs,
+    }
+  }
   const active = songRevision.current()
-  const hasAuthoritativeCdpId = !!(active?.identity?.source === 'cdp' && active.identity.id)
+  const hasAuthoritativeCdpId = canTrustCdpSongIdentity({
+    identity: active?.identity,
+    isNeteaseSource: cur.isNetease,
+    cdpConnected: ncmcdp.isConnected(),
+    cdpFresh: cdpActive(),
+  })
   if (smtcChanged && !hasAuthoritativeCdpId) {
     markSongReplacement()
-    beginSong({ name: cur.title, artist: cur.artist }, 'smtc', hasPos ? !!cur.playing : true)
+    beginSong({
+      name: cur.title,
+      artist: cur.artist,
+      album: cur.album,
+      cover: cur.cover,
+      avatar: cur.avatar,
+      artistImageUrl: cur.artistImageUrl,
+      durationMs: cur.durationMs,
+      sourceAppId: cur.sourceAppId,
+      playbackSource: cur.playbackSource || desktopSourceId(cur),
+      preciseMirror: cur.isNetease,
+    }, 'smtc', hasPos ? !!cur.playing : true)
+  } else if (activeSourceChanged) {
+    np.mirror = null
+    mirrorKey = ''
+    mirrorOrder = { capturedAt: 0, seq: 0 }
+    np.syncStatus = cur.isNetease ? 'waiting-identity' : 'timeline'
+    pushState()
   }
 
   if (hasPos) {
-    // 實測：網易雲回報給 Windows 的位置永遠是 0（status 卻是正確的 Playing/Paused）。
-    // 若拿它對時，字幕每 0.6 秒就被拉回開頭 → 前幾句無限循環。
-    // 因此位置絕不採用 SMTC；只有 CDP 有真實秒數時才對時，否則讓時鐘自走。
-    if (cdpSec >= 0) {
-      if (!!cur.playing !== clk.playing) clkSync(clkPos(), !!cur.playing, 'cdp+state')
+    if (cur.isNetease) {
+      // 實測：網易雲回報給 Windows 的位置永遠是 0；沿用 CDP 或自走時鐘。
+      if (cdpSec >= 0) {
+        if (!!cur.playing !== clk.playing) clkSync(clkPos(), !!cur.playing, 'cdp+state')
+      } else {
+        clkSync(clkPos(), !!cur.playing, 'freerun')
+      }
     } else {
-      // 只同步「播放/暫停」，位置保持自走（clkPos 會依真實時間前進）
-      clkSync(clkPos(), !!cur.playing, 'freerun')
+      const clock = smtcClockDecision(lastSmtcClockState, cur)
+      lastSmtcClockState = clock
+      if (clock.shouldAnchor) clkSync(clock.positionMs, clock.playing, 'smtc')
+      else if (clock.playingChanged) clkSync(clkPos(), clock.playing, 'smtc-state')
     }
     pushTick()
   } else if (!ncmcdp.isConnected()) {
@@ -989,7 +1407,10 @@ ipcMain.handle('state:set', (_e, patch) => {
   applyPatch(patch)
   if (patch.cfg && 'alwaysOnTop' in patch.cfg && overlay) overlay.setAlwaysOnTop(!!state.cfg.alwaysOnTop, 'screen-saver')
   if (patch.cfg && 'backdrop' in patch.cfg) updateCapture()
-  broadcastState(); saveState()
+  if (patch.ui) refreshTrayMenu()
+  broadcastState()
+  // 具名配置是使用者手動調出來、掉了就重建不回來的資料，不能等 debounce
+  saveState({ immediate: 'profiles' in patch })
 })
 
 // 僅清除璃音自己的本機資料；憑證、資料庫路徑與 Cookie 永不送到 Renderer。
@@ -1030,15 +1451,40 @@ ipcMain.handle('overlay:setSize', (_e, w, h, mx, my) => {
   enforceBounds()
 })
 ipcMain.handle('overlay:getBounds', () => (overlay ? overlay.getBounds() : null))
-ipcMain.handle('overlay:capturePill', async (event, crop = {}) => {
-  if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents) return null
+async function captureOverlayRegion(rect) {
+  if (!overlay || overlay.isDestroyed()) return null
+  try {
+    const image = await Promise.race([
+      overlay.webContents.capturePage(rect, { stayHidden: true, stayAwake: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('capture page timeout')), 500)),
+    ])
+    return image && !image.isEmpty() ? image.toDataURL() : null
+  } catch (error) {
+    return null
+  }
+}
+function normalizeCaptureRect(crop = {}) {
+  if (!overlay || overlay.isDestroyed()) return null
   const [contentWidth, contentHeight] = overlay.getContentSize()
   const x = Math.max(0, Math.min(contentWidth - 1, Math.floor(Number(crop.x) || 0)))
   const y = Math.max(0, Math.min(contentHeight - 1, Math.floor(Number(crop.y) || 0)))
   const width = Math.max(1, Math.min(contentWidth - x, 1600, Math.ceil(Number(crop.width) || 1)))
   const height = Math.max(1, Math.min(contentHeight - y, 600, Math.ceil(Number(crop.height) || 1)))
-  const image = await overlay.webContents.capturePage({ x, y, width, height })
-  return image.isEmpty() ? null : image.toDataURL()
+  return { x, y, width, height }
+}
+// 這是單向 IPC：擷取由主行程在目前 IPC callback 結束後啟動，
+// 避免 Renderer 正在等待 invoke 回覆時和 Chromium compositor 互相等待。
+ipcMain.on('overlay:capturePill:start', (event, { requestId, crop } = {}) => {
+  if (!overlay || overlay.isDestroyed() || event.sender !== overlay.webContents || requestId == null) return
+  const rect = normalizeCaptureRect(crop)
+  if (!rect) {
+    event.sender.send('overlay:capturePill:result', { requestId, dataUrl: null })
+    return
+  }
+  setImmediate(async () => {
+    const dataUrl = await captureOverlayRegion(rect)
+    if (!event.sender.isDestroyed()) event.sender.send('overlay:capturePill:result', { requestId, dataUrl })
+  })
 })
 // 拖曳中就即時夾限（不是放開滑鼠才拉回來）
 ipcMain.handle('overlay:setPosition', (_e, x, y) => {
@@ -1050,8 +1496,11 @@ ipcMain.handle('overlay:setPosition', (_e, x, y) => {
 ipcMain.handle('overlay:setIgnoreMouse', (_e, ignore) => { if (overlay) overlay.setIgnoreMouseEvents(!!ignore, { forward: true }) })
 ipcMain.handle('menu:popup', () => popupOverlayMenu())
 ipcMain.handle('console:open', () => openConsole())
-ipcMain.handle('console:close', () => { if (consoleWin && !consoleWin.isDestroyed()) consoleWin.close() })
-ipcMain.handle('app:quit', () => app.quit())
+ipcMain.handle('console:close', () => requestConsoleClose())
+ipcMain.handle('console:close-with', (_e, { action, remember } = {}) => performConsoleClose(action, remember === true))
+ipcMain.handle('console:show-pill', () => performConsoleClose('pill'))
+ipcMain.handle('console:hide-to-tray', () => performConsoleClose('tray'))
+ipcMain.handle('app:quit', () => requestFinalQuit())
 
 // ---------- IPC：應用程式更新 ----------
 ipcMain.handle('update:snapshot', () => updateService?.snapshot() || {
@@ -1107,7 +1556,7 @@ ipcMain.handle('room:leave', () => {
 })
 ipcMain.handle('room:setState', (_e, s) => room.setState(s))
 ipcMain.handle('room:tick', (_e, t) => room.tick(t))
-if (!app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1') {
+if (RUNTIME_QA) {
   ipcMain.handle('room:qaState', (_event, snapshot) => {
     playback.setMode('member')
     playback.update(SOURCE.ROOM_HOST, snapshot)
@@ -1120,9 +1569,14 @@ if (!app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1') {
 }
 ipcMain.handle('room:snapshot', () => ({
   ...room.snapshot(),
-  state: playback.current(),
+  // 成員重連期間房間快照仍是主持人的權威狀態；播放仲裁器可能被本機
+  // 背景媒體來源刷新成空值，不能因此把已保留的房間狀態清掉。
+  state: room.mode === 'member' ? room.state : playback.current(),
 }))
 ipcMain.handle('room:lanip', () => getLanIp())
+// All usable addresses, so the host can pick the one their guests can actually
+// reach (LAN vs VPN adapter) instead of being given one automatically.
+ipcMain.handle('room:lanips', () => listLanIps())
 ipcMain.handle('room:command', async (_e, { type, payload } = {}) => {
   const command = { commandId: randomUUID(), type: String(type || ''), payload: payload || {} }
   if (room.mode === 'host') {
@@ -1242,17 +1696,19 @@ ipcMain.handle('localPlaylist:move', (_e, { id, position } = {}) => localPlaylis
 // ---------- IPC：內建播放器 ----------
 function playerDecision() {
   const selected = playback.current()
-  return playerControlDecision({
+  const result = playerControlDecision({
     roomMode: room.mode,
     enabled: unofficialPlaybackAllowed,
     activeSource: selected?.playing ? selected.source : SOURCE.IDLE,
   })
+  return result.ok ? result : { ...result, errorCode: playerErrorCode(result.error) }
 }
 
 function playerPublicSnapshot() {
   return {
     enabled: unofficialPlaybackAllowed,
     reason: unofficialPlaybackAllowed ? '' : '商用封裝版尚未取得官方網易雲播放授權',
+    reasonCode: unofficialPlaybackAllowed ? '' : PLAYER_ERROR_CODES.PROVIDER_UNAVAILABLE,
     source: playback.current()?.source || SOURCE.IDLE,
     song: internalPlayer.song ? { ...internalPlayer.song } : null,
     positionMs: internalPlayer.positionMs,
@@ -1260,6 +1716,8 @@ function playerPublicSnapshot() {
     playing: internalPlayer.playing,
     loading: internalPlayer.loading,
     error: internalPlayer.error,
+    errorCode: playerErrorCode(internalPlayer.error),
+    queue: queueSnapshot(),
   }
 }
 
@@ -1274,11 +1732,62 @@ function publishInternalState() {
   return selected
 }
 
-async function loadInternalTrack(trackId) {
+// 內建播放器的播放佇列。
+//
+// 上一首／下一首必須有真的東西可以走，不能只是擺兩顆按不動的按鈕。
+// 佇列來自使用者實際點播的那份清單（搜尋結果或歌單），所以「下一首」
+// 走的就是他當下看到的順序。
+const internalQueue = { tracks: [], index: -1 }
+
+function setInternalQueue(tracks, currentId) {
+  // The console passes full track objects, but a bare list of ids is the
+  // obvious thing for any other caller to send. Reading only `.trackId`/`.id`
+  // turned every number into an empty string, so those entries were filtered
+  // away and the caller ended up with an EMPTY queue — strictly worse than
+  // passing no queue at all, which at least yields the current track. That
+  // silently kills the previous/next buttons, so accept both shapes.
+  const list = (Array.isArray(tracks) ? tracks : [])
+    .map((track) => {
+      const bare = typeof track === 'string' || typeof track === 'number'
+      return {
+        trackId: String(bare ? track : (track?.trackId ?? track?.id ?? '')).trim(),
+        name: bare ? '' : String(track?.name || ''),
+        artist: bare ? '' : String(track?.artist || ''),
+      }
+    })
+    // '0' is a sentinel, not a track id — shared/trackIdentity.cjs already
+    // rejects it, and letting it through would queue an unplayable entry.
+    .filter((track) => track.trackId && track.trackId !== '0')
+  internalQueue.tracks = list
+  internalQueue.index = list.findIndex((track) => track.trackId === String(currentId))
+}
+
+function queueSnapshot() {
+  const { tracks, index } = internalQueue
+  return {
+    length: tracks.length,
+    index,
+    hasPrevious: index > 0,
+    hasNext: index >= 0 && index < tracks.length - 1,
+  }
+}
+
+function queueStep(offset) {
+  const { tracks, index } = internalQueue
+  if (index < 0) return null
+  const next = index + offset
+  return next >= 0 && next < tracks.length ? tracks[next] : null
+}
+
+async function loadInternalTrack(trackId, context = {}) {
   const decision = playerDecision()
   if (!decision.ok) return decision
   const id = String(trackId ?? '').trim()
-  if (!id) return { ok: false, error: '歌曲 ID 無效' }
+  if (!id) return { ok: false, error: '歌曲 ID 無效', errorCode: PLAYER_ERROR_CODES.INVALID_ID }
+  // 帶了清單就更新佇列；沒帶就把這首當成單曲，避免沿用上一份不相干的清單
+  if (Array.isArray(context.queue)) setInternalQueue(context.queue, id)
+  else if (internalQueue.tracks.every((track) => track.trackId !== id)) setInternalQueue([{ trackId: id }], id)
+  else internalQueue.index = internalQueue.tracks.findIndex((track) => track.trackId === id)
 
   const revision = ++internalRevision
   internalPlayer = reduceInternalPlayer(internalPlayer, {
@@ -1290,21 +1799,21 @@ async function loadInternalTrack(trackId) {
   try {
     const playable = await netease.getPlayableSong(id)
     if (revision !== internalRevision) return { ok: false, stale: true }
-    if (!playable.detail || !playable.url) throw new Error('歌曲目前無法播放')
+    if (!playable.detail) throw createPlayerError(PLAYER_ERROR_CODES.NO_PLAYABLE_SOURCE)
+    if (!playable.url) throw createPlayerError(playable.errorCode || PLAYER_ERROR_CODES.NO_PLAYABLE_SOURCE)
 
-    const [pair, avatar] = await Promise.all([
-      netease.getLyricPair(id).catch(() => ({ lrc: '', trans: '' })),
-      netease.getArtistAvatar(playable.detail.artistId).catch(() => ''),
-    ])
+    const pair = await netease.getLyricPair(id).catch(() => ({ yrc: '', lrc: '', trans: '' }))
     if (revision !== internalRevision) return { ok: false, stale: true }
 
-    const parsed = parseLrc(pair.lrc)
+    const wordTimed = parseYrc(pair.yrc)
+    const parsed = wordTimed.lines.length ? wordTimed : parseLrc(pair.lrc)
     internalPlayer = reduceInternalPlayer(internalPlayer, {
       type: 'load-ready',
       revision,
       song: {
         ...playable.detail,
-        avatar: avatar || playable.detail.cover || '',
+        artistImageUrl: '',
+        avatar: '',
         loading: false,
         artworkReady: true,
       },
@@ -1314,6 +1823,13 @@ async function loadInternalTrack(trackId) {
     })
     publishInternalState()
     sendPlayerCommand({ type: 'load', revision, url: playable.url, autoplay: true })
+    if (playable.detail.artistId) {
+      netease.getArtistAvatar(playable.detail.artistId).then((avatar) => {
+        if (revision !== internalRevision || !avatar) return
+        internalPlayer = reduceInternalPlayer(internalPlayer, { type: 'artwork', revision, avatar })
+        publishInternalState()
+      }).catch(() => {})
+    }
     return { ok: true }
   } catch (error) {
     if (revision !== internalRevision) return { ok: false, stale: true }
@@ -1321,27 +1837,51 @@ async function loadInternalTrack(trackId) {
       type: 'error', revision, message: String(error.message || error), retryCount: 1,
     })
     publishInternalState()
-    return { ok: false, error: internalPlayer.error }
+    return { ok: false, error: internalPlayer.error, errorCode: playerErrorCode(internalPlayer.error) }
   }
+}
+
+async function stepInternalQueue(offset) {
+  const decision = playerDecision()
+  if (!decision.ok) return decision
+  const target = queueStep(offset)
+  if (!target) {
+    const errorCode = offset > 0 ? PLAYER_ERROR_CODES.NO_NEXT : PLAYER_ERROR_CODES.NO_PREVIOUS
+    return { ok: false, error: errorCode, errorCode }
+  }
+  return loadInternalTrack(target.trackId)
 }
 
 function runPlayerCommand(type, extra = {}) {
   const decision = playerDecision()
   if (!decision.ok) return decision
-  if (!internalPlayer.revision || !internalPlayer.song) return { ok: false, error: '尚未選擇歌曲' }
+  if (!internalPlayer.revision || !internalPlayer.song) {
+    return { ok: false, error: PLAYER_ERROR_CODES.NO_SONG, errorCode: PLAYER_ERROR_CODES.NO_SONG }
+  }
   sendPlayerCommand({ type, revision: internalPlayer.revision, ...extra })
   return { ok: true }
 }
 
-ipcMain.handle('player:load', (_event, trackId) => loadInternalTrack(trackId))
+ipcMain.handle('player:load', (_event, trackId, context) => loadInternalTrack(trackId, context || {}))
+ipcMain.handle('player:next', () => stepInternalQueue(1))
+ipcMain.handle('player:previous', () => stepInternalQueue(-1))
 ipcMain.handle('player:play', () => runPlayerCommand('play'))
 ipcMain.handle('player:pause', () => runPlayerCommand('pause'))
 ipcMain.handle('player:toggle', () => runPlayerCommand('toggle'))
 ipcMain.handle('player:seek', (_event, positionMs) => runPlayerCommand('seek', {
   positionMs: Math.max(0, Number(positionMs) || 0),
 }))
+ipcMain.handle('player:volume', (_event, value) => {
+  const parsed = Number(value)
+  const volume = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : state.cfg.internalPlayerVolume
+  state.cfg.internalPlayerVolume = volume
+  sendPlayerCommand({ type: 'volume', value: volume })
+  broadcastState()
+  saveState()
+  return { ok: true, value: volume }
+})
 ipcMain.handle('player:snapshot', () => playerPublicSnapshot())
-if (!app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1') {
+if (RUNTIME_QA) {
   ipcMain.handle('player:qaLoad', (_event, url) => {
     const revision = ++internalRevision
     internalPlayer = reduceInternalPlayer(internalPlayer, {
@@ -1365,15 +1905,36 @@ if (!app.isPackaged && process.env.LUCENT_RUNTIME_QA === '1') {
 }
 ipcMain.on('player:event', async (event, mediaEvent = {}) => {
   if (!audioServiceWin || audioServiceWin.isDestroyed() || event.sender.id !== audioServiceWin.webContents.id) return
+  if (mediaEvent.type === 'ready') {
+    audioServiceReady = true
+    flushPendingPlayerCommands()
+    return
+  }
   const revision = Number(mediaEvent.revision) || 0
   if (!revision || revision !== internalPlayer.revision) return
+
+  if (mediaEvent.type === 'spectrum') {
+    const bands = Array.isArray(mediaEvent.bands)
+      ? mediaEvent.bands.slice(0, 32).map((value) => Math.max(0, Math.min(1, Number(value) || 0)))
+      : []
+    if (playback.current()?.source === SOURCE.INTERNAL) {
+      sendAll('player:spectrum', {
+        active: mediaEvent.active === true && internalPlayer.playing,
+        sequence: Math.max(0, Math.floor(Number(mediaEvent.sequence) || 0)),
+        bands,
+      })
+    }
+    return
+  }
 
   if (mediaEvent.type === 'error' && internalPlayer.urlRetryCount === 0) {
     internalPlayer = { ...internalPlayer, playing: false, loading: true, urlRetryCount: 1, error: '' }
     publishInternalState()
     try {
       const url = await netease.getSongUrl(internalPlayer.trackId)
-      if (revision !== internalRevision || !url) throw new Error('歌曲目前無法播放')
+      if (revision !== internalRevision || !url) throw createPlayerError(
+        url ? PLAYER_ERROR_CODES.MEDIA_LOAD_FAILED : PLAYER_ERROR_CODES.NO_PLAYABLE_SOURCE,
+      )
       sendPlayerCommand({ type: 'load', revision, url, autoplay: true, retry: true })
       return
     } catch (error) {
@@ -1399,27 +1960,36 @@ ipcMain.on('player:event', async (event, mediaEvent = {}) => {
     return
   }
   publishInternalState()
-  if (eventType === 'ended') advanceRoomQueue().catch(() => {})
+  if (eventType === 'ended') {
+    // 房間佇列優先（主持人的點播清單）；沒有的話才走內建播放器自己的佇列。
+    advanceRoomQueue()
+      .then((advanced) => { if (!advanced && queueStep(1)) stepInternalQueue(1).catch(() => {}) })
+      .catch(() => { if (queueStep(1)) stepInternalQueue(1).catch(() => {}) })
+  }
 })
 
 // 指定要跟隨哪個播放來源（null = 自動找網易雲）
 ipcMain.handle('np:setFollow', (_e, app) => {
   followApp = app || null
-  np.title = '' // 強制重新偵測 / 重抓歌詞
+  activeSessionResolver.reset()
   return { ok: true }
 })
 
-ipcMain.handle('ncm:relaunchDebug', async () => {
+function relaunchNcmDebug() {
   const ps = "$p=(Get-Process -Name cloudmusic -EA SilentlyContinue | Select-Object -First 1 -Expand Path); "
     + "if(-not $p){ $p='C:\\Program Files\\NetEase\\CloudMusic\\cloudmusic.exe' }; "
     + "Get-Process -Name cloudmusic -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue; "
     + "Start-Sleep -Milliseconds 900; "
     + "if(Test-Path $p){ Start-Process -FilePath $p -ArgumentList '--remote-debugging-port=9222'; 'OK' } else { 'NO_EXE' }"
-  return await new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true, timeout: 15000 }, (err, stdout) => {
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-Command', ps], { windowsHide: true, timeout: 15000 }, (err, stdout) => {
       resolve({ ok: /OK/.test(stdout || ''), out: (stdout || '').trim(), error: err ? String(err.message) : '' })
     })
   })
+}
+
+ipcMain.handle('ncm:relaunchDebug', () => {
+  return relaunchNcmDebug()
 })
 
 // ---------- 生命週期 ----------
@@ -1428,13 +1998,7 @@ if (!hasSingleInstanceLock) {
 } else {
 app.on('second-instance', () => {
   if (!app.isReady()) return
-  if (!overlay || overlay.isDestroyed()) createOverlay()
-  else {
-    if (overlay.isMinimized()) overlay.restore()
-    overlay.show()
-    overlay.focus()
-    enforceBounds()
-  }
+  openConsole()
 })
 
 app.whenReady().then(() => {
@@ -1459,8 +2023,12 @@ app.whenReady().then(() => {
   restartUpdateService()
   createAudioService()
   createOverlay()
-  smtc.start(onSmtc, path.join(app.getPath('userData'), 'lgl-np.ps1'))
-  ncmcdp.start(onCdp)
+  createTray()
+  if (state.ui?.console?.startupView !== 'pill') openConsole()
+  if (!RUNTIME_QA) {
+    smtc.start(onSmtc, path.join(app.getPath('userData'), 'lgl-np.ps1'))
+    ncmcdp.start(onCdp)
+  }
 
   // 螢幕環境改變（解析度、DPI 縮放、插拔螢幕）→ 重新驗證位置，
   // 避免藥丸留在已不存在的座標而「程式有開但找不到」。
@@ -1471,12 +2039,14 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Alt+L', () => { applyPatch({ cfg: { clickThrough: !state.cfg.clickThrough } }); broadcastState(); saveState() })
   globalShortcut.register('CommandOrControl+Alt+S', () => openConsole())
   globalShortcut.register('CommandOrControl+Alt+Space', () => { if (overlay) overlay.webContents.send('cmd:toggle-play') })
-  app.on('activate', () => { if (!overlay || overlay.isDestroyed()) createOverlay() })
+  app.on('activate', openConsole)
 })
 }
+app.on('before-quit', () => { explicitQuit = true })
 app.on('will-quit', () => {
   globalShortcut.unregisterAll(); room.close(); smtc.stop(); ncmcdp.stop()
   if (localPlaylists) { try { localPlaylists.close() } catch {}; localPlaylists = null }
   if (updateService) { updateService.stop(); updateService = null }
+  if (tray) { tray.destroy(); tray = null }
 })
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => { if (explicitQuit) app.quit() })
