@@ -22,11 +22,14 @@ async function waitFor(check, message, timeoutMs = 20000) {
   throw new Error(message)
 }
 
+let nextHighPort = 43000 + (process.pid % 1000)
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
+    const candidate = nextHighPort++
+    server.listen(candidate, '127.0.0.1', () => {
       const { port } = server.address()
       server.close((error) => error ? reject(error) : resolve(port))
     })
@@ -54,7 +57,10 @@ async function stopTree(child) {
 async function cdpPage(port) {
   return waitFor(async () => {
     const pages = await fetch(`http://127.0.0.1:${port}/json`).then((response) => response.json())
-    return pages.find((page) => page.type === 'page' && !page.url.includes('#')) || null
+    // Electron creates an about:blank target before preload/navigation is
+    // ready. It has no bridge, so accepting it makes this smoke test fail
+    // nondeterministically before the real overlay page appears.
+    return pages.find((page) => page.type === 'page' && /^https?:\/\//.test(page.url) && !page.url.includes('#')) || null
   }, `CDP page on ${port} did not become ready`)
 }
 
@@ -86,7 +92,10 @@ async function connect(page) {
 }
 
 function launchElectron({ cdpPort, userData, dataPath, viteUrl }) {
-  return startProcess(electron, ['.', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${userData}`], {
+  // Chromium switches must precede the app path. When they followed '.',
+  // Electron treated them as app arguments, so every fixture could fall back
+  // to the user's real profile and collide with the single-instance lock.
+  return startProcess(electron, [`--remote-debugging-port=${cdpPort}`, `--user-data-dir=${userData}`, '.'], {
     cwd: root,
     env: { ...process.env, VITE_DEV_SERVER_URL: viteUrl, LUCENT_RUNTIME_QA: '1', LUCENT_DATA_PATH: dataPath },
   })
