@@ -58,7 +58,7 @@ streamed**, so bandwidth stays minimal.
 
 - **Windows 10 or 11.** Lucent relies on the Windows `GlobalSystemMediaTransportControls` API, so
   it is Windows-only by design.
-- Node.js 22.5+ and npm, if you are building from source.
+- Node.js 22.12+ and npm, if you are building from source.
 
 ---
 

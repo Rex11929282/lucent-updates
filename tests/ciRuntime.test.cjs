@@ -10,7 +10,7 @@ test('CI uses a Node runtime that provides the local SQLite API', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 
   assert.match(workflow, /node-version:\s*22(?:\.x)?\b/, 'CI must use Node 22 or newer')
-  assert.equal(pkg.engines?.node, '>=22.5.0')
+  assert.equal(pkg.engines?.node, '>=22.12.0')
 })
 
 test('CI validates the public release configuration before building', () => {
