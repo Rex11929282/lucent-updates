@@ -41,6 +41,7 @@ const { canExecuteRoomCommand, createRequestLimiter, normalizeCapabilities } = r
 const { createUpdateService, updateCapability } = require('./updateService.cjs')
 const { readBundledUpdateConfig } = require('../shared/updateConfig.cjs')
 const { createActiveSessionResolver } = require('../shared/activeSessionResolver.cjs')
+const { createWindowStateRelay } = require('../shared/windowStateRelay.cjs')
 const { nativeUiLabels, resolveNativeLocale, SUPPORTED_NATIVE_LOCALES } = require('../shared/nativeUiLocale.cjs')
 const { preferredUiLocale } = require('../shared/systemLocale.cjs')
 const packagePolicy = require('../package.json').lucent || {}
@@ -62,6 +63,7 @@ let explicitQuit = false
 const room = new Room()
 const playback = createPlaybackCoordinator()
 const activeSessionResolver = createActiveSessionResolver()
+const windowStateRelay = createWindowStateRelay()
 const allowUnofficialNetease = packagePolicy.nonCommercialDevelopment === true
   || process.env.LUCENT_ALLOW_UNOFFICIAL_NETEASE === '1'
 const unofficialPlaybackAllowed = internalPlaybackEnabled({
@@ -174,7 +176,12 @@ function applyPatch(patch) {
   }
 }
 function sendAll(channel, payload) {
+  if (channel === 'room:state' || channel === 'np:info') windowStateRelay.remember(channel, payload)
   for (const w of [overlay, consoleWin]) if (w && !w.isDestroyed()) w.webContents.send(channel, payload)
+}
+function replayWindowState(win) {
+  if (!win || win.isDestroyed()) return
+  windowStateRelay.replay((channel, payload) => win.webContents.send(channel, payload))
 }
 
 function restartUpdateService() {
@@ -460,6 +467,7 @@ function openConsole() {
   if (consoleWin && !consoleWin.isDestroyed()) {
     consoleWin.show()
     consoleWin.focus()
+    replayWindowState(consoleWin)
     setOverlayConsoleCollapsed(true)
     return
   }
@@ -471,6 +479,7 @@ function openConsole() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, additionalArguments: rendererArguments() },
   })
   loadRoute(consoleWin, 'console')
+  consoleWin.webContents.once('did-finish-load', () => replayWindowState(consoleWin))
   consoleWin.once('ready-to-show', () => {
     if (!consoleWin || consoleWin.isDestroyed()) return
     consoleWin.show()
