@@ -9,17 +9,17 @@ Everything below has been verified against a running build, not only against the
 
 ## Current state
 
-- Version is **1.1.0** in `package.json` and `CHANGELOG.md`. Do not move it to 1.0.0. Published
+- Version is **1.1.1** in `package.json` and `CHANGELOG.md`. Do not move it to 1.0.0. Published
   builds already reach 1.0.3 and electron-updater never downgrades, so 1.0.0 would strand every
   existing install. The reasoning is recorded in the changelog entry itself.
-- `npm test` — 731 tests across two suites (156 + 575), all passing. `npm run build` clean.
+- `npm test` — 732 tests across two suites (156 + 576), all passing. `npm run build` clean.
 - Runtime checks — audio playback, room reconnect, and the 42-call IPC fuzz probe all pass in
   isolated temporary profiles. The IPC probe reports 37 clean resolutions, 5 contained rejections,
   and zero wedged main processes.
 - `npm run release:check` intentionally fails when the two release signals are absent; with
   `LUCENT_UPDATE_REPOSITORY=Rex11929282/lucent-updates` and stable channel it passes.
-- GitHub Release **v1.1.0** is published at
-  `https://github.com/Rex11929282/lucent-updates/releases/tag/v1.1.0` with the NSIS installer,
+- GitHub Release **v1.1.1** is published at
+  `https://github.com/Rex11929282/lucent-updates/releases/tag/v1.1.1` with the NSIS installer,
   matching blockmap and `latest.yml`. The remote installer size and SHA-256 match the local files.
 - **Repository consolidation completed:** `Rex11929282/lucent-updates` is the single public
   repository for source, project history and binary Release assets. The obsolete binary-only

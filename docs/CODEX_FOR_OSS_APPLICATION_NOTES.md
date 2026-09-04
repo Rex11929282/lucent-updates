@@ -30,14 +30,14 @@ day of submission because they change.
 
 | Metric | Value |
 | --- | --- |
-| Stars | `2` |
+| Stars | `3` |
 | Forks | `0` |
 | Contributors | `1` |
-| Releases published | `5` |
-| Release asset download count | `41` |
+| Releases published | `1` |
+| Release asset download count | `0` |
 | Open / closed issues | `0 / 0` |
-| Pull requests (open / closed) | `12 / 0` |
-| Commit activity (last 90 days) | `8` |
+| Pull requests (open / closed) | `7 / 5` |
+| Commit activity (last 90 days) | `14` |
 
 If a number is small, leave it small. Inflated or invented metrics are both dishonest and trivially
 checkable by a reviewer.

@@ -143,9 +143,9 @@ Packaging is gated by a preflight that refuses to produce an official-looking bu
 required release signals, which is a real safeguard rather than a formality. Artifact naming is
 stable and the updater contract (`latest.yml`, `.exe`, `.blockmap`) is documented.
 
-**What is still missing:** the version decision is resolved at **1.1.0**. The task brief called for
+**What is still missing:** the version decision is resolved at **1.1.1**. The task brief called for
 1.0.0 as a first official release, but published versions already reach 1.0.3, and shipping 1.0.0
-would stop auto-update for existing installs. A public v1.1.0 binary release is now cut from the
+would stop auto-update for existing installs. A public v1.1.1 binary release is now cut from the
 current documentation and changelog; the installer is unsigned and clean-machine install/update
 verification remains a maintainer check.
 
