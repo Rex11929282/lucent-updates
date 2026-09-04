@@ -3,18 +3,18 @@
 The remaining unchecked items require the repository owner or a real user environment. Repository
 settings and automated checks that could be completed safely have already been applied.
 
-The repository is public and its v1.1.0 binary release is published in the same repository after
+The repository is public and its v1.1.1 binary release is published in the same repository after
 local verification. Legal-name and remaining community settings are still maintainer decisions.
 
 ---
 
 ## Decisions still open
 
-- [x] **Version number — set to `1.1.0`.** The brief asked for `1.0.0`, but published builds already
+- [x] **Version number — set to `1.1.1`.** The brief asked for `1.0.0`, but published builds already
       reach `1.0.3` and electron-updater never moves a user backwards, so `1.0.0` would strand every
-      existing install on an unmaintained version. `1.1.0` still reads as the first documented
-      release. `package.json` and the `CHANGELOG.md` heading are updated together. The v1.1.0
-      release is now published; change both only if you intentionally plan a later version.
+      existing install on an unmaintained version. `1.1.1` is a patch release of the first documented
+      version and ensures existing `1.1.0` installs can receive the update. `package.json` and the
+      `CHANGELOG.md` heading are updated together. The v1.1.1 release is now published.
 - [ ] **License copyright holder.** `LICENSE` reads `Copyright (c) 2026 Rex11929282`, taken from the
       repository URL. This is the one item nobody but you can decide: replace it with your legal name
       if you want the copyright to be enforceable under it, or keep the handle if you prefer not to

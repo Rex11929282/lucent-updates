@@ -15,10 +15,10 @@ behind a green suite in a single day, so where a runtime check exists it was run
 | # | Item | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | Recent Codex work not reverted | **Verified** | Concurrent changes are present and were built on, not overwritten — `smtcClock.cjs`, `resourceCache`, `activeSessionResolver`, `artworkCache`, and the temporary-profile improvement to the IPC fuzz script |
-| 2 | App version exactly `1.0.0` | **Deviation** | Set to **1.1.0**. Published builds already reach 1.0.3 and electron-updater never downgrades, so 1.0.0 would strand every existing install on an unmaintained version. Reason recorded in `CHANGELOG.md` |
+| 2 | App version exactly `1.0.0` | **Deviation** | Set to **1.1.1**. Published builds already reach 1.0.3 and electron-updater never downgrades, so 1.0.0 would strand every existing install on an unmaintained version. The patch version lets existing 1.1.0 installs receive this package. |
 | 3 | README is a complete product README | **Verified (static)** | Rewritten in English; still has no screenshots — see the manual checklist |
 | 4 | Open-source licence present | **Verified (static)** | MIT `LICENSE`. Copyright holder is the owner's decision, not a placeholder |
-| 5 | GitHub auto-update still works | **Verified (published feed)** | v1.1.0 is published with `latest.yml`, the NSIS installer and matching `.blockmap`; the local and remote installer size/SHA-256 match, and the packaged `app-update.yml` points to the same public repository. A clean-machine install/update remains a manual check |
+| 5 | GitHub auto-update still works | **Verified (published feed)** | v1.1.1 is published with `latest.yml`, the NSIS installer and matching `.blockmap`; the packaged `app-update.yml` points to the same public repository. A clean-machine install/update remains a manual check |
 | 6–9 | Quick presets replaced: `good`, `wow`, `game good` | **Verified** | All three visible and applying complete configurations (`tests/quickPresets.test.mjs`) |
 | 10 | Room Copy works | **Verified** | Fixed and re-checked with real `Input.dispatchMouseEvent` hit testing, not `element.click()` |
 | 11 | Search input readable | **Verified** | Was 30px wide because `.btn { width: 100% }` met `flex: none`; fixed and swept |
@@ -50,7 +50,7 @@ behind a green suite in a single day, so where a runtime check exists it was run
 | 41 | `npm test` passes | **Verified** | 732 tests across two suites (156 + 576) |
 | 42 | `npm run build` passes | **Verified** | Clean |
 | 43 | Release check passes | **Verified** | `npm run release:check` passes with `LUCENT_UPDATE_REPOSITORY=Rex11929282/lucent-updates` and the stable channel; it still refuses an official build when those signals are absent |
-| 44 | Single source/update repository | **Verified** | Public `lucent-updates` contains the complete source and v1.1.0 installer, blockmap and `latest.yml`; the obsolete binary-only repository was deleted and the packaged feed URL is unchanged |
+| 44 | Single source/update repository | **Verified** | Public `lucent-updates` contains the complete source and v1.1.1 installer, blockmap and `latest.yml`; the obsolete binary-only repository was deleted and the packaged feed URL is unchanged |
 
 ---
 

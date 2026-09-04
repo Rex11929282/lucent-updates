@@ -14,6 +14,13 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.1] - 2026-09-04
+
+重新封裝目前已驗證的璃音 Lucent，提供可選安裝路徑的 NSIS 安裝程式與 GitHub 自動更新資訊。
+此修訂版本只更新發布包版本，不新增遊戲相關功能，也不產生 Portable 版。
+
+---
+
 ## [1.1.0] - 2026-09-03
 
 First release with complete documentation, an open-source licence and a multilingual interface.
