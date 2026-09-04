@@ -3,8 +3,8 @@
 Everything below has to be done by a person. None of it can be changed from this repository's source
 tree — these are GitHub settings, OpenAI account details, and judgement calls.
 
-No GitHub repository settings or legal decisions have been applied automatically. The v1.1.0
-binary release has been published separately after local verification.
+The repository is public and its v1.1.0 binary release is published in the same repository after
+local verification. Legal-name and remaining community settings are still maintainer decisions.
 
 ---
 
@@ -32,7 +32,7 @@ binary release has been published separately after local verification.
 `docs/GITHUB_SETTINGS_TO_APPLY.md`**, including the description, the topic list, which toggles to
 turn on, and the order to do them in. The list below is the tick-box version.
 
-- [ ] Repository is **Public**
+- [x] Repository is **Public**
 - [ ] Your GitHub **profile is public**
 - [ ] **Description** set — paste-ready text in `docs/GITHUB_SETTINGS_TO_APPLY.md`
 - [ ] **Topics** configured — paste-ready list in the same file
@@ -42,10 +42,8 @@ turn on, and the order to do them in. The list below is the tick-box version.
 - [ ] **Discussions** enabled, if you want usage questions separated from bugs
 - [ ] **Private vulnerability reporting** enabled (Settings → Security), since `SECURITY.md` tells
       people to use it — if it is off, that instruction is broken
-- [ ] Consider **renaming the repository** so it reads as the project rather than an update feed.
-      Before renaming, confirm what `LUCENT_UPDATE_REPOSITORY` is set to in your release environment
-      and update it afterwards. Verify an update completes from an already-installed build before
-      relying on GitHub's redirect.
+- [x] Source and update assets use one repository at `Rex11929282/lucent-updates`; keep this path
+      stable because installed clients use it as their update endpoint.
 
 ## CI and automation
 

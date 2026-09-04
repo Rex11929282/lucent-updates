@@ -1,7 +1,7 @@
 # GitHub settings to apply by hand
 
-Everything here has to be done in the GitHub web UI — it cannot be set from the repository tree.
-Each block is ready to paste. Nothing in this file has been applied automatically.
+The repository is already public and its description is applied through GitHub. The remaining
+blocks are ready for the maintainer to apply where useful.
 
 ---
 
@@ -61,22 +61,15 @@ Not strictly required for a solo repo, but cheap and it makes CI meaningful:
 
 ## Repository name
 
-The repo is currently named after an update feed rather than the product. Renaming it to `lucent`
-would read far better to anyone landing on it.
-
-**Before renaming**, check what `LUCENT_UPDATE_REPOSITORY` is set to in your release environment. The
-updater resolves releases through that name. GitHub does redirect the old name, but an auto-update
-path that depends on a redirect is not something to discover during an incident — after renaming,
-install an older build and confirm it still updates before you rely on it.
+Keep `Rex11929282/lucent-updates`. It is now the single public source and Release repository, and
+already-installed clients use this exact path as their update endpoint.
 
 ---
 
 ## Order to do this in
 
-1. Make the repository public
-2. Set description and topics
-3. Turn on Issues, Discussions and private vulnerability reporting
-4. Open a pull request so the CI workflow runs for the first time
-5. Only once CI is green, add branch protection and consider a CI badge in the README —
+1. Set topics
+2. Turn on Issues, Discussions and private vulnerability reporting
+3. Open a pull request so the CI workflow runs for the first time
+4. Only once CI is green, add branch protection and consider a CI badge in the README —
    a badge for a workflow that has never run is worse than no badge
-6. Rename the repository last, after verifying the updater

@@ -50,7 +50,7 @@ behind a green suite in a single day, so where a runtime check exists it was run
 | 41 | `npm test` passes | **Verified** | 731 tests across two suites (156 + 575) |
 | 42 | `npm run build` passes | **Verified** | Clean |
 | 43 | Release check passes | **Verified** | `npm run release:check` passes with `LUCENT_UPDATE_REPOSITORY=Rex11929282/lucent-updates` and the stable channel; it still refuses an official build when those signals are absent |
-| 44 | Source/update repository split | **Verified** | `lucent-source` is private; public `lucent-updates` contains only README and the v1.1.0 installer, blockmap and `latest.yml`; the packaged feed URL is unchanged |
+| 44 | Single source/update repository | **Verified** | Public `lucent-updates` contains the complete source and v1.1.0 installer, blockmap and `latest.yml`; the obsolete binary-only repository was deleted and the packaged feed URL is unchanged |
 
 ---
 

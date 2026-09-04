@@ -1,30 +1,30 @@
-# GitHub 原始碼與自動更新拆分方案
+# GitHub 原始碼與自動更新單一倉庫方案
 
-## 已完成的拆分
+## 目前狀態
 
-- 原本含有完整原始碼的倉庫已改名為 [`Rex11929282/lucent-source`](https://github.com/Rex11929282/lucent-source)，並設定為 Private；原始碼歷史保留。
-- 已重新建立公開 [`Rex11929282/lucent-updates`](https://github.com/Rex11929282/lucent-updates)，根目錄只保留更新站說明 README。
-- 公開更新站的 `v1.1.0` Release 只包含 NSIS 安裝器、`.blockmap` 與 `latest.yml`。
-- 已安裝版本的 `app-update.yml` 仍指向固定名稱 `Rex11929282/lucent-updates`，因此不需要更換更新網址。
+- [`Rex11929282/lucent-updates`](https://github.com/Rex11929282/lucent-updates) 是唯一的公開倉庫。
+- 同一個倉庫保存完整原始碼、Git 歷史、文件與 GitHub Release 更新資產。
+- 已刪除舊的純二進位更新倉庫，不再維護 `lucent-source`／`lucent-updates` 雙倉庫。
+- 原始碼倉庫接管既有 `lucent-updates` 名稱，因此已安裝版本不需要更換更新網址。
 
 ## 驗證結果
 
-- `lucent-source`: `private=true`。
-- `lucent-updates`: `private=false`，根目錄只有 `README.md`。
-- `v1.1.0`: 非 draft、非 prerelease，資產名稱與本機一致。
-- 遠端安裝器大小 `117,971,881` bytes，SHA-256 與本機一致。
-- 遠端 blockmap 與 `latest.yml` SHA-256、大小與本機一致。
-- 遠端 `latest.yml` 內容與本機一致。
+- `lucent-updates`: `public`，預設分支是 `main`，包含 `package.json` 與 `src/`。
+- 帳號下只剩一個以 `lucent` 開頭的倉庫。
+- `v1.1.0`: 非 draft、非 prerelease，包含 NSIS 安裝器、`.blockmap` 與 `latest.yml`。
+- 遠端安裝器大小 `117,971,881` bytes，SHA-256 為 `29bde3915d0ea99f4795c6bbd855d38e88525a9619096a5e4ce64c97f7135809`。
+- `latest.yml` 可由公開 HTTPS 更新網址下載，SHA-256 為 `764cba4da495ee16363717d0afb6689b6cc6b3915f18ddd6a4df3deee0580603`。
 - 封裝後的更新設定仍使用 `owner: Rex11929282`、`repo: lucent-updates`。
 
-## 不採用的做法
+## 遷移方式
 
-- 不在目前公開倉庫新增一個刪除原始碼的 commit：Git 歷史仍公開，不能達到閉源目的。
-- 不把 GitHub Token 放入安裝器：公開使用者無法安全共用私人 Release 憑證。
-- 不在沒有新的公開 feed 前直接把現有倉庫設為 Private：這會讓目前已安裝版本無法讀取更新。
+1. 先確認兩個倉庫的 v1.1.0 三項資產名稱、大小與 SHA-256 完全一致。
+2. 將原始碼倉庫設為公開，並保留完整 Git 歷史及 Release。
+3. 讓原始碼倉庫接管 `lucent-updates` 名稱，維持既有安裝版的更新端點。
+4. 驗證公開原始碼、Release 與 `latest.yml` 後，刪除退役的純更新倉庫。
 
 ## 後續維護注意
 
-- 新版本仍只把安裝器、對應 `.blockmap` 與 `latest.yml` 上傳到 `lucent-updates`。
-- 原始碼、測試與開發文件只推送到私有 `lucent-source`。
-- 不要把私人倉庫憑證放入安裝器或公開更新資產。
+- 原始碼、測試、文件與新 Release 全部推送到同一個 `lucent-updates` 倉庫。
+- 每次 Release 仍須上傳同次建置產生的安裝器、對應 `.blockmap` 與 `latest.yml`。
+- 不要把 GitHub Token、帳號密碼或簽章憑證提交到原始碼或 Release。

@@ -21,9 +21,10 @@ Everything below has been verified against a running build, not only against the
 - GitHub Release **v1.1.0** is published at
   `https://github.com/Rex11929282/lucent-updates/releases/tag/v1.1.0` with the NSIS installer,
   matching blockmap and `latest.yml`. The remote installer size and SHA-256 match the local files.
-- **Visibility correction resolved:** the source repository is now private at
-  `Rex11929282/lucent-source`, while public `Rex11929282/lucent-updates` contains only its README
-  and binary Release assets. The packaged update URL remains unchanged.
+- **Repository consolidation completed:** `Rex11929282/lucent-updates` is the single public
+  repository for source, project history and binary Release assets. The obsolete binary-only
+  repository was deleted after the source repository took over the same URL, so packaged clients
+  keep their existing update endpoint.
 - Sections 1–22 of the 1.0.0 task document are done and verified. Sections 8–22 were checked
   behaviourally against the spec, not just for file presence — see
   `tests/mediaSpecConformance.test.cjs`, where each assertion carries its requirement number.
