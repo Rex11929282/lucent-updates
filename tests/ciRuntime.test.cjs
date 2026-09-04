@@ -16,6 +16,7 @@ test('CI uses a Node runtime that provides the local SQLite API', () => {
 test('CI validates the public release configuration before building', () => {
   const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8')
 
+  assert.match(workflow, /run:\s*npm ci --ignore-scripts --no-audit --no-fund/)
   assert.match(workflow, /run:\s*npm run release:check/)
   assert.match(workflow, /LUCENT_UPDATE_REPOSITORY:\s*Rex11929282\/lucent-updates/)
   assert.match(workflow, /LUCENT_RELEASE_CHANNEL:\s*stable/)

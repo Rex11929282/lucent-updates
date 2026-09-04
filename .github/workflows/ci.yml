@@ -25,7 +25,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # Tests and the renderer build do not need Electron's download/prepare
+        # hooks; keeping install script-free also avoids untrusted postinstall
+        # code on the CI runner and makes the job faster.
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Release preflight
         env:
