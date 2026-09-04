@@ -41,5 +41,11 @@
     "electron-builder": "^26.15.3",
     "vite": "^6.0.0",
     "wait-on": "^8.0.1"
+  },
+  "overrides": {
+    "NeteaseCloudMusicApi": {
+      "music-metadata": "11.12.3"
+    },
+    "qs": "6.16.0"
   }
 }

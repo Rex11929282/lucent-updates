@@ -37,3 +37,11 @@ test('the non-commercial build includes the provider and its runtime API depende
   assert.equal(pkg.devDependencies.NeteaseCloudMusicApi, undefined)
   assert.equal(buildConfig.files.includes('!electron/netease.cjs'), false)
 })
+
+test('the bundled NetEase parser uses fixed metadata and query-parser versions', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
+  assert.equal(pkg.overrides?.NeteaseCloudMusicApi?.['music-metadata'], '11.12.3')
+  assert.equal(pkg.overrides?.qs, '6.16.0')
+  assert.doesNotThrow(() => require('NeteaseCloudMusicApi'))
+  assert.doesNotThrow(() => require('music-metadata'))
+})

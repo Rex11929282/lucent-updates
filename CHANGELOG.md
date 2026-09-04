@@ -10,6 +10,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 - 修復 Windows 媒體工作階段先回報歌名／歌手、後補上時長時被誤判成新工作階段，避免不必要的來源切換與歌詞重載。
+- 升級 `electron-builder` 建置鏈至 26.15.3，並鎖定網易雲 API 所帶的 `music-metadata` 11.12.3 與 `qs` 6.16.0 安全修補版；保留既有網易雲 API 呼叫介面。
 
 ---
 
