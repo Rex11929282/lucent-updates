@@ -12,7 +12,7 @@ Everything below has been verified against a running build, not only against the
 - Version is **1.1.1** in `package.json` and `CHANGELOG.md`. Do not move it to 1.0.0. Published
   builds already reach 1.0.3 and electron-updater never downgrades, so 1.0.0 would strand every
   existing install. The reasoning is recorded in the changelog entry itself.
-- `npm test` — 732 tests across two suites (156 + 576), all passing. `npm run build` clean.
+- `npm test` — 734 tests across two suites (158 + 576), all passing. `npm run build` clean.
 - Runtime checks — audio playback, room reconnect, and the 42-call IPC fuzz probe all pass in
   isolated temporary profiles. The IPC probe reports 37 clean resolutions, 5 contained rejections,
   and zero wedged main processes.

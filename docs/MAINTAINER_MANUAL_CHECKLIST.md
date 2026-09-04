@@ -63,6 +63,7 @@ turn on, and the order to do them in. The list below is the tick-box version.
 - [x] Confirm `latest.yml`, the `.exe` and the `.blockmap` are all attached — removing or renaming
       any of them breaks auto update for existing installs
 - [ ] Install the published artifact on a clean machine and confirm it runs
+      A same-machine fresh-prefix smoke test passed with the locally built `Lucent-Setup-1.1.1.exe`; this does not replace the clean-machine check.
 
 ## README screenshots
 
