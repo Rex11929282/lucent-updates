@@ -97,23 +97,33 @@ test('no renderer derives a display language from navigator directly', () => {
 
 test('the shared helper prefers the bridge and falls back to navigator', async () => {
   const { detectSystemLocale } = await import('../src/i18n.js')
-  const savedWindow = global.window
-  const savedNavigator = global.navigator
+  const savedWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value,
+  })
+  const restoreGlobal = (name, descriptor) => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor)
+    else delete globalThis[name]
+  }
 
   try {
-    global.navigator = { language: 'zh-CN' }
-    global.window = { overlay: { systemLocale: 'zh-Hant-TW' } }
+    setGlobal('navigator', { language: 'zh-CN' })
+    setGlobal('window', { overlay: { systemLocale: 'zh-Hant-TW' } })
     assert.equal(detectSystemLocale(), 'zh-Hant-TW', 'the bridge value must win')
 
     // Browser-based development has no preload bridge.
-    global.window = {}
+    setGlobal('window', {})
     assert.equal(detectSystemLocale(), 'zh-CN', 'must fall back to navigator')
 
     // An empty bridge value must not shadow the fallback.
-    global.window = { overlay: { systemLocale: '' } }
+    setGlobal('window', { overlay: { systemLocale: '' } })
     assert.equal(detectSystemLocale(), 'zh-CN')
   } finally {
-    if (savedWindow === undefined) delete global.window; else global.window = savedWindow
-    if (savedNavigator === undefined) delete global.navigator; else global.navigator = savedNavigator
+    restoreGlobal('window', savedWindow)
+    restoreGlobal('navigator', savedNavigator)
   }
 })
