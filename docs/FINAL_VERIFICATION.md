@@ -63,6 +63,10 @@ its blockmap and `latest.yml`. A clean-machine install/update remains a manual c
 The local `Lucent-Setup-1.1.1.exe` was also installed into a new temporary directory and launched
 successfully; this is a same-machine fresh-prefix smoke test, not proof of a clean-machine install.
 
+The Electron audio-service runtime smoke passed local, remote CORS/non-CORS, stale-track replacement,
+and pause cases with non-zero analyser output. This verifies the internal audio service and clock
+handoff; it is not a live NetEase provider or artwork acceptance test.
+
 The repository description, topics, Issues, Discussions, private vulnerability reporting, Dependabot
 security updates, Wiki/Projects state, CI and CodeQL are now applied or verified. Profile visibility,
 legal copyright-name choice, native wording review, a publishable desktop screenshot and live
