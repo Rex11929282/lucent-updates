@@ -14,7 +14,7 @@ below is marked TODO precisely because it changes and must not be guessed.
 
 ## Repository
 
-`TODO: fill with the current official public source repository URL before submission`
+`https://github.com/Rex11929282/lucent-updates`
 
 Note: if the repository is still named after an update feed rather than the project, see the
 "Repository presentation" section below before applying.
@@ -25,18 +25,19 @@ Primary Maintainer.
 
 ## Current verifiable metrics
 
-Fill each of these from the GitHub UI or API on submission day. Do not estimate.
+Snapshot read from the public GitHub API on **2026-09-04 (Asia/Taipei)**. Refresh these values on the
+day of submission because they change.
 
 | Metric | Value |
 | --- | --- |
-| Stars | `TODO: fill with current verified metric before submission` |
-| Forks | `TODO: fill with current verified metric before submission` |
-| Contributors | `TODO: fill with current verified metric before submission` |
-| Releases published | `TODO: fill with current verified metric before submission` |
-| Release asset download count | `TODO: fill with current verified metric before submission` |
-| Open / closed issues | `TODO: fill with current verified metric before submission` |
-| Pull requests | `TODO: fill with current verified metric before submission` |
-| Commit activity (last 90 days) | `TODO: fill with current verified metric before submission` |
+| Stars | `2` |
+| Forks | `0` |
+| Contributors | `1` |
+| Releases published | `5` |
+| Release asset download count | `41` |
+| Open / closed issues | `0 / 0` |
+| Pull requests (open / closed) | `12 / 0` |
+| Commit activity (last 90 days) | `8` |
 
 If a number is small, leave it small. Inflated or invented metrics are both dishonest and trivially
 checkable by a reviewer.
@@ -88,11 +89,11 @@ release-storage repo, a reviewer will read it that way.
 
 Checklist before applying:
 
-- [ ] The repository presents itself as the main Lucent source repository, not an updates mirror
-- [ ] Description mentions Windows, desktop lyrics overlay, media-session detection, synchronized
+- [x] The repository presents itself as the main Lucent source repository, not an updates mirror
+- [x] Description mentions Windows, desktop lyrics overlay, media-session detection, synchronized
       lyrics, and open source
-- [ ] Topics configured (see below)
-- [ ] GitHub detects the MIT license
+- [x] Topics configured (see below)
+- [x] GitHub detects the MIT license
 - [ ] README has real screenshots, not mockups
 
 ### Suggested description

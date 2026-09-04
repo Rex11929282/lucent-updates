@@ -1,35 +1,25 @@
-# GitHub settings to apply by hand
+# GitHub settings record
 
-The repository is already public and its description is applied through GitHub. The remaining
-blocks are ready for the maintainer to apply where useful.
+The single public source/update repository is `Rex11929282/lucent-updates`. Settings that can be
+applied safely through the repository API are already applied and should not be duplicated in a
+second repository.
 
 ---
 
 ## Repository description
 
-Paste into Settings → General → Description (350 char limit; this is 138):
+Current description (350 char limit):
 
 ```
-Liquid-glass desktop lyrics for Windows. Detects whatever is actually playing — NetEase, Spotify, YouTube Music — and syncs lyrics over your desktop.
+璃音 Lucent：Windows 桌面液態玻璃即時歌詞與共同聆聽軟體。
 ```
 
 ## Topics
 
-Paste into the repository home page → ⚙ next to About → Topics:
+Current topics:
 
 ```
-electron
-windows
-lyrics
-desktop-widget
-music
-overlay
-smtc
-netease-cloud-music
-spotify
-youtube-music
-react
-liquid-glass
+desktop-widget electron liquid-glass lyrics music netease-cloud-music overlay react smtc spotify windows youtube-music
 ```
 
 ## Homepage
@@ -42,12 +32,13 @@ Leave **empty**. There is no project website, and pointing it at the repo itself
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Visibility | **Public** | Required for a Codex for Open Source application |
-| Issues | **On** | `SUPPORT.md` and the issue templates assume it |
-| Discussions | **On** | Keeps usage questions out of the bug tracker |
-| Private vulnerability reporting | **On** | Settings → Security. `SECURITY.md` tells people to use it; leaving it off makes that instruction a dead end |
-| Wiki | Off | Documentation lives in `docs/`, two places will drift |
-| Projects | Off | Single maintainer |
+| Visibility | **Public** | Applied |
+| Issues | **On** | Applied; `SUPPORT.md` and issue templates assume it |
+| Discussions | **On** | Applied; keeps usage questions out of the bug tracker |
+| Private vulnerability reporting | **On** | Applied; `SECURITY.md` points maintainers here |
+| Dependabot security updates | **On** | Applied after enabling vulnerability alerts |
+| Wiki | Off | Applied; documentation lives in `docs/` |
+| Projects | Off | Applied; this is a single-maintainer repository |
 
 ## Branch protection on `main`
 
@@ -66,10 +57,13 @@ already-installed clients use this exact path as their update endpoint.
 
 ---
 
-## Order to do this in
+## Applied order
 
-1. Set topics
-2. Turn on Issues, Discussions and private vulnerability reporting
-3. Open a pull request so the CI workflow runs for the first time
-4. Only once CI is green, add branch protection and consider a CI badge in the README —
-   a badge for a workflow that has never run is worse than no badge
+1. Set topics and repository description
+2. Turn on Issues, Discussions and vulnerability reporting
+3. Enable Dependabot security updates
+4. Run the Windows CI and CodeQL workflows; both now pass on the main branch
+5. Add the CI badge to the README after the first successful run
+
+Branch protection is intentionally not applied: direct maintainer pushes are the current release
+workflow. It can be enabled later after a pull-request release process is chosen.

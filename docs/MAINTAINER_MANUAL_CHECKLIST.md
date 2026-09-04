@@ -1,7 +1,7 @@
 # Manual checklist for the maintainer
 
-Everything below has to be done by a person. None of it can be changed from this repository's source
-tree — these are GitHub settings, OpenAI account details, and judgement calls.
+The remaining unchecked items require the repository owner or a real user environment. Repository
+settings and automated checks that could be completed safely have already been applied.
 
 The repository is public and its v1.1.0 binary release is published in the same repository after
 local verification. Legal-name and remaining community settings are still maintainer decisions.
@@ -34,26 +34,23 @@ turn on, and the order to do them in. The list below is the tick-box version.
 
 - [x] Repository is **Public**
 - [ ] Your GitHub **profile is public**
-- [ ] **Description** set — paste-ready text in `docs/GITHUB_SETTINGS_TO_APPLY.md`
-- [ ] **Topics** configured — paste-ready list in the same file
-- [ ] **Homepage** left empty (there is no real site; do not invent one)
-- [ ] GitHub shows **MIT** in the sidebar (it detects `LICENSE` automatically — confirm it appears)
-- [ ] **Issues** enabled
-- [ ] **Discussions** enabled, if you want usage questions separated from bugs
-- [ ] **Private vulnerability reporting** enabled (Settings → Security), since `SECURITY.md` tells
+- [x] **Description** set — current value is recorded in `docs/GITHUB_SETTINGS_TO_APPLY.md`
+- [x] **Topics** configured — current list is recorded in the same file
+- [x] **Homepage** left empty (there is no real site; do not invent one)
+- [x] GitHub shows **MIT** in the sidebar (confirmed through the repository API)
+- [x] **Issues** enabled
+- [x] **Discussions** enabled, if you want usage questions separated from bugs
+- [x] **Private vulnerability reporting** enabled (Settings → Security), since `SECURITY.md` tells
       people to use it — if it is off, that instruction is broken
 - [x] Source and update assets use one repository at `Rex11929282/lucent-updates`; keep this path
       stable because installed clients use it as their update endpoint.
 
 ## CI and automation
 
-- [ ] Open a pull request and confirm the **CI workflow actually runs and passes** on the Windows
-      runner. The workflow is committed but has never executed.
-- [ ] Confirm **CodeQL** completes and reports into the Security tab
-- [ ] Confirm **Dependabot** is enabled for the repository (the config file alone does nothing if the
-      feature is off in settings)
-- [ ] Only after CI is genuinely green, consider adding a CI badge to the README. It has deliberately
-      not been added, because a badge for a workflow that has never run is worse than no badge.
+- [x] Confirm the **CI workflow actually runs and passes** on the Windows runner
+- [x] Confirm **CodeQL** completes and reports into the Security tab
+- [x] Confirm **Dependabot security updates** is enabled for the repository
+- [x] CI badge added to the README after CI became green
 
 ## Release
 

@@ -1,5 +1,8 @@
 # Lucent (璃音)
 
+[![CI](https://github.com/Rex11929282/lucent-updates/actions/workflows/ci.yml/badge.svg)](https://github.com/Rex11929282/lucent-updates/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Rex11929282/lucent-updates/actions/workflows/codeql.yml/badge.svg)](https://github.com/Rex11929282/lucent-updates/actions/workflows/codeql.yml)
+
 **An open-source Windows desktop lyrics overlay and media-session integration project.**
 Lucent detects which media session is actually playing on your PC, normalizes its metadata and
 artwork, resolves synchronized lyrics, and renders them in a customizable liquid-glass overlay
@@ -55,7 +58,7 @@ streamed**, so bandwidth stays minimal.
 
 - **Windows 10 or 11.** Lucent relies on the Windows `GlobalSystemMediaTransportControls` API, so
   it is Windows-only by design.
-- Node.js 20+ and npm, if you are building from source.
+- Node.js 22.5+ and npm, if you are building from source.
 
 ---
 

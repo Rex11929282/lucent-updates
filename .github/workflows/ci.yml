@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Release preflight
+        env:
+          LUCENT_UPDATE_REPOSITORY: Rex11929282/lucent-updates
+          LUCENT_RELEASE_CHANNEL: stable
+        run: npm run release:check
+
       - name: Test
         run: npm test
 
