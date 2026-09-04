@@ -33,7 +33,7 @@ local verification. Legal-name and remaining community settings are still mainta
 turn on, and the order to do them in. The list below is the tick-box version.
 
 - [x] Repository is **Public**
-- [ ] Your GitHub **profile is public**
+- [x] Your GitHub **profile is public** — the unauthenticated GitHub user endpoint returned HTTP 200 and exposed the public profile data on 2026-09-05.
 - [x] **Description** set — current value is recorded in `docs/GITHUB_SETTINGS_TO_APPLY.md`
 - [x] **Topics** configured — current list is recorded in the same file
 - [x] **Homepage** left empty (there is no real site; do not invent one)

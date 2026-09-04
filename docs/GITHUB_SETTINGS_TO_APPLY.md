@@ -11,7 +11,7 @@ second repository.
 Current description (350 char limit):
 
 ```
-璃音 Lucent：Windows 桌面液態玻璃即時歌詞與共同聆聽軟體。
+Open-source Windows desktop liquid-glass lyrics overlay with automatic media-session detection, synchronized lyrics, and shared listening.
 ```
 
 ## Topics
