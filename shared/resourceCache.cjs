@@ -2,7 +2,6 @@ function timeoutPromise(loader, timeoutMs) {
   let timer = null
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('resource request timed out')), timeoutMs)
-    timer.unref?.()
   })
   return Promise.race([Promise.resolve().then(loader), timeout])
     .finally(() => clearTimeout(timer))
