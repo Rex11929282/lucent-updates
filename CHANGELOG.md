@@ -9,15 +9,15 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- 修復 Windows 媒體工作階段先回報歌名／歌手、後補上時長時被誤判成新工作階段，避免不必要的來源切換與歌詞重載。
-- 升級 `electron-builder` 建置鏈至 26.15.3，並鎖定網易雲 API 所帶的 `music-metadata` 11.12.3 與 `qs` 6.16.0 安全修補版；保留既有網易雲 API 呼叫介面。
+- Fixed Windows media sessions being treated as new sessions when duration metadata arrives after title and artist metadata, avoiding unnecessary source switches and lyric reloads.
+- Upgraded the `electron-builder` toolchain to 26.15.3 and pinned the `music-metadata` 11.12.3 and `qs` 6.16.0 security fixes used by the NetEase API, while preserving the existing NetEase API interface.
 
 ---
 
 ## [1.1.1] - 2026-09-04
 
-重新封裝目前已驗證的璃音 Lucent，提供可選安裝路徑的 NSIS 安裝程式與 GitHub 自動更新資訊。
-此修訂版本只更新發布包版本，不新增遊戲相關功能，也不產生 Portable 版。
+Repackaged the validated Lucent build with a selectable-path NSIS installer and GitHub automatic-update metadata.
+This patch release updates the distribution version only; it adds no game-related functionality and does not produce a Portable build.
 
 ---
 

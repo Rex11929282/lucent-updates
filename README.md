@@ -1,4 +1,4 @@
-# Lucent (璃音)
+# Lucent
 
 [![CI](https://github.com/Rex11929282/lucent-updates/actions/workflows/ci.yml/badge.svg)](https://github.com/Rex11929282/lucent-updates/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Rex11929282/lucent-updates/actions/workflows/codeql.yml/badge.svg)](https://github.com/Rex11929282/lucent-updates/actions/workflows/codeql.yml)

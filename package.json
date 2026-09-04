@@ -5,7 +5,7 @@
   "lucent": {
     "nonCommercialDevelopment": true
   },
-  "description": "璃音 Lucent — 懸浮桌面的液態玻璃音樂字幕",
+  "description": "Lucent — a Windows desktop liquid-glass lyrics overlay and shared listening app",
   "engines": {
     "node": ">=22.12.0"
   },
