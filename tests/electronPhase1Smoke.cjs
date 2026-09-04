@@ -46,7 +46,8 @@ async function connect(page) {
 }
 
 async function main() {
-  const overlayPage = (await pages()).find((page) => page.type === 'page' && !page.url.includes('#console'))
+  const overlayPage = (await pages()).find((page) => page.type === 'page'
+    && !page.url.includes('#console') && !page.url.includes('#audio-service'))
   assert.ok(overlayPage, 'Overlay page must exist')
   const overlay = await connect(overlayPage)
   let consoleConnection = null
