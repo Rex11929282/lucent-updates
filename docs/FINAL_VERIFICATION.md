@@ -61,9 +61,9 @@ HTTP 200 during this verification, and the latest release still contains exactly
 its blockmap and `latest.yml`. A clean-machine install/update remains a manual check.
 
 Unauthenticated HTTP HEAD checks for the published `latest.yml`, installer, and blockmap each returned
-200 with content lengths 341, 114995863, and 120885 bytes respectively. These are the current remote
-release assets; the newer local rebuild is intentionally not uploaded while the source-visibility
-decision remains unresolved.
+200 with content lengths 341, 114997078, and 120790 bytes respectively. These are the current remote
+release assets and their SHA-256 digests match the local `release/` output. The single `v1.1.1` tag
+now points at the same verified `main` commit used to build them.
 
 The local `Lucent-Setup-1.1.1.exe` was also installed into a new temporary directory and launched
 successfully; this is a same-machine fresh-prefix smoke test, not proof of a clean-machine install.
@@ -72,12 +72,12 @@ The Electron audio-service runtime smoke passed local, remote CORS/non-CORS, sta
 and pause cases with non-zero analyser output. This verifies the internal audio service and clock
 handoff; it is not a live NetEase provider or artwork acceptance test.
 
-The repository description, topics, Issues, Discussions, private vulnerability reporting, Dependabot
-security updates, Wiki/Projects state, CI and CodeQL are now applied or verified. Profile visibility,
-legal copyright-name choice, native wording review, a publishable desktop screenshot and live
-Spotify/YouTube Music detection still need the repository owner or a matching real environment.
+The repository description, public visibility, topics, Issues, Discussions, private vulnerability
+reporting, Dependabot security updates, Wiki/Projects state, CI and CodeQL are now applied or
+verified. Legal copyright-name choice, native wording review, a publishable desktop screenshot and
+live Spotify/YouTube Music detection still need the repository owner or a matching real environment.
 
 Spotify and YouTube Music detection (#14, #15) are verified against the normalization layer with
 realistic session shapes, not against those applications running. The logic is exercised; the
 integration is not. If either app is installed, playing a track and watching the source label is a
-five-second confirmation worth doing before release.
+five-second confirmation worth doing before the next release.
