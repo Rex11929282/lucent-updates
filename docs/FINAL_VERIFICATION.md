@@ -60,6 +60,11 @@ The published feed and package wiring for auto-update (#5) are verified. The pub
 HTTP 200 during this verification, and the latest release still contains exactly one NSIS installer,
 its blockmap and `latest.yml`. A clean-machine install/update remains a manual check.
 
+Unauthenticated HTTP HEAD checks for the published `latest.yml`, installer, and blockmap each returned
+200 with content lengths 341, 114995863, and 120885 bytes respectively. These are the current remote
+release assets; the newer local rebuild is intentionally not uploaded while the source-visibility
+decision remains unresolved.
+
 The local `Lucent-Setup-1.1.1.exe` was also installed into a new temporary directory and launched
 successfully; this is a same-machine fresh-prefix smoke test, not proof of a clean-machine install.
 
